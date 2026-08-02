@@ -144,6 +144,20 @@ Add users to the following groups
 . ~/.espressif/tools/activate_idf_v6.0.2.sh
 ```
 
+### Configuring projects
+
+Create initial configuration for target.
+This also overwrites an existing, custom configuration with the default configuration for the chose target.
+```
+idf.py --list-targets
+idf.py set-target esp32h2
+```
+
+Customize configuration
+```
+idf.py menuconfig
+```
+
 ## Appendix
 
 ### Comparison of Different Cross Compilation Settings

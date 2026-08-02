@@ -7,3 +7,99 @@ doc/ext/*
 !doc/ext/.gitkeep
 managed_components/*
 !managed_components/.gitkeep
+
+## Created by codeshack.io
+
+### Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msm
+*.msp
+*.lnk
+
+### Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+### VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+## Created by https://www.toptal.com/developers/gitignore/api/clion
+
+### CLion
+
+#### User-specific stuff
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/dictionaries
+.idea/**/shelf
+
+#### AWS User-specific
+.idea/**/aws.xml
+
+#### Generated files
+.idea/**/contentModel.xml
+
+#### Sensitive or high-churn files
+.idea/**/dataSources/
+.idea/**/dataSources.ids
+.idea/**/dataSources.local.xml
+.idea/**/sqlDataSources.xml
+.idea/**/dynamic.xml
+.idea/**/uiDesigner.xml
+.idea/**/dbnavigator.xml
+
+#### Gradle
+.idea/**/gradle.xml
+.idea/**/libraries
+
+#### Mongo Explorer plugin
+.idea/**/mongoSettings.xml
+
+#### mpeltonen/sbt-idea plugin
+.idea_modules/
+
+#### Cursive Clojure plugin
+.idea/replstate.xml
+
+#### SonarLint plugin
+.idea/sonarlint/
+
+#### Editor-based Rest Client
+.idea/httpRequests
+
+#### Android studio 3.1+ serialized cache file
+.idea/caches/build_file_checksums.ser
+
+##### Sonarlint plugin
+.idea/**/sonarlint/
+
+#### SonarQube Plugin
+.idea/**/sonarIssues.xml
+
+#### Markdown Navigator plugin
+.idea/**/markdown-navigator.xml
+.idea/**/markdown-navigator-enh.xml
+.idea/**/markdown-navigator/
+
+#### Cache file creation bug
+.idea/$CACHE_FILE$
+
+#### CodeStream plugin
+.idea/codestream.xml
+
+#### Azure Toolkit for IntelliJ plugin
+.idea/**/azureSettings.xml

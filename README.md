@@ -1,12 +1,14 @@
 # Navlico - Navigation Light Control
 
-Navlico (short for "Navigation Light Control") is a small, embedded program for the Espressif ESP32-H2 to control the navigation lights on a leisure boat.
+Navlico (short for “Navigation Light Control”) is a small, embedded program for the Espressif ESP32-H2 to control the navigation lights on a leisure boat.
 
 ## Table of Content
 
  1. [Setting up the Build Environment](doc/setting-up-build-environment.md)
  2. [Working with the Build Environment](doc/using-build-environment.md)
  3. [Configuring the Project](doc/configuring-project.md)
+ 4. Setting up the IDE
+     1. [Setting up LionC](doc/setting-up-lionc.md)
 
 ## References
 

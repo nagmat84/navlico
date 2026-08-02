@@ -29,30 +29,31 @@ The following descriptions are based on
  - [Gentoo Wiki: Arduino](https://wiki.gentoo.org/wiki/Arduino)
  - [Gentoo Wiki: Embedded Handbook - Creating a Cross-Compiler](https://wiki.gentoo.org/wiki/Embedded_Handbook/General/Creating_a_cross-compiler)
  - [Gentoo Wiki: Crossdev](https://wiki.gentoo.org/wiki/Crossdev)
-The Gentoo Arduino documentation discourages to use the pre-built, proprietary, manufacturer's toolchain,
+The Gentoo Arduino documentation discourages to use the pre-built, proprietary, manufacturer’s toolchain,
 [but use the native Gentoo tools](https://wiki.gentoo.org/wiki/Arduino#Recommended:_Install_the_toolchain_using_crossdev).
 
 However, this approach has three major problems which makes it complete unusable:
  - The `crossdev` tool assumes that a kernel always exist and is also quite buggy.
  - The documentation is not in a good shape.
  - The provided tool chain is outdated.
+
 Despite the documentation claiming otherwise, Crossdev seems to focus on cross-compiling Linux packages (specifically Gentoo, of course) for a different architecture which runs a Linux kernel.
 This makes some things a bit easier as the Linux Kernel already abstracts away a lot of the differences of the underlying architecture through syscalls.
-In particular, one C library (GNU C Lib, MUSL, etc.) can target several platforms, because it doesn't need to implement the low-level hardware-specific aspects.
-However, in embedded programming we don't have a kernel, so this approach isn't viable.
+In particular, one C library (GNU C Lib, MUSL, etc.) can target several platforms, because it doesn’t need to implement the low-level hardware-specific aspects.
+However, in embedded programming we don’t have a kernel, so this approach isn’t viable.
 On the one hand, the documentation is quite incomplete and misses descriptions for the most basic settings (e.g. allowed and correct values for the target triplet).
 On the other hand, it describes features which simply do not exist or which might have been planned, but never realized.
 The provided toolchain does not seem to have been updated since the first Arduinos were released.
 It does not know ESP32, not even the very first ESP32 (without any suffix).
 
-Bottom line is, this approach doesn't work.
+Bottom line is, this approach doesn’t work.
 I order to make it work, one must probably fix and extend `crossdev` considerably.
 But it probably would be easier to port and package [CrosstoolNG](https://crosstool-ng.github.io/) for Gentoo.
 It tries to solve the same problem as `crossdev`, i.e. setting up a toolchain for cross-compilation, but CrosstoolNG is neither limited to Gentoo nor a Gentoo-brewed solution.
 Also, Espressif seems to use CrosstoolNG themselves to built their own toolchain.
 
 The following guide is just conserved for historic reasons.
-It's incomplete and not working.
+It’s incomplete and not working.
  
  1. Create repository `crossdev`
      1. Run `eselect repository create crossdev`

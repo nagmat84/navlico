@@ -1,3 +1,6 @@
+*.backup
+*.old
+*.tmp
 build/*
 !build/.gitkeep
 doc/ext/*

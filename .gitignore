@@ -1,0 +1,6 @@
+build/*
+!build/.gitkeep
+doc/ext/*
+!doc/ext/.gitkeep
+managed_components/*
+!managed_components/.gitkeep

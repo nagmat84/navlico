@@ -130,6 +130,15 @@ void static setup_navlico_fsm_output_pins( void ) {
 #endif
 }
 
+/*void handle_gpio_interrupt( void* ) {
+	vTaskResume( main_task_handle );
+}
+
+void setup_isr( void ) {
+	main_task_handle = xTaskGetCurrentTaskHandle();
+	gpio_isr_register( handle_gpio_interrupt, nullptr, ESP_INTR_FLAG_HIGH | ESP_INTR_FLAG_SHARED, nullptr );
+}*/
+
 /**
  * Reads the input pins and returns the currently or most recently pressed button.
  *
@@ -138,6 +147,7 @@ void static setup_navlico_fsm_output_pins( void ) {
  *  - after waking-up from deep sleep
  *  - after waking-up from light sleep
  *  - during normal runtime
+ *  - after the interrupt-service routine (ISR) released the main task from suspension
  *
  * @param firstRun If `true`, the function does not read the current level of the input pins,
  * but reads the input level which has been latched upon boot.
@@ -371,6 +381,7 @@ void update_navlico_fsm_state( bool firstRun ) {
 void navlico_fsm_task( void* ) {
 	setup_navlico_fsm_input_pins();
 	setup_navlico_fsm_output_pins();
+	//setup_isr();
 
 	// First run action
 	update_navlico_fsm_state( true );

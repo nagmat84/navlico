@@ -39,13 +39,6 @@ RTC_DATA_ATTR static struct timeval light_sleep_enter_time;
 RTC_DATA_ATTR static navlico_operational_state_t operational_state;
 
 /**
- * Amount of ticks to wait for input buttons to stabilize and become released again
- *
- * TODO: Don't use a fix time period, but actively monitor and wait until user has released buttons again
- */
-static constexpr TickType_t delayTicks = 50;
-
-/**
  * Logs the duration since last deep sleep.
  *
  * The function only logs a message if the log level is DEBUG or higher.
@@ -194,57 +187,82 @@ void setup_output_pins( void ) {
  *  - after cold boot
  *  - after waking-up from deep sleep
  *  - after waking-up from light sleep
+ *  - during normal runtime
  *
- *  @return The currently or most recently pressed button.
+ * @param firstRun If `true`, the function does not read the current level of the input pins,
+ * but reads the input level which has been latched upon boot.
+ * After booting from deep-sleep users may already have released the buttons again, hence reading the current input
+ * level won't give the desired result.
+ * If `false`, the function reads the current level of the input pins.
+ * @return The currently or most recently pressed button.
  */
-navlico_operational_state_t read_input_pins( void ) {
-	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
-	ESP_LOGI( LOG_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
+navlico_operational_state_t read_input_pins( bool const firstRun ) {
+	static constexpr uint_fast8_t debounceProbes = 5;
+	static constexpr useconds_t initialDebounceDelay = 20000;
+	static constexpr useconds_t inbetweenDebounceDelay = 2000;
 
-	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
-		ESP_LOGI( LOG_TAG, "Woke up from deep sleep" );
-		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
-		if ( GPIO_SAILING_BUTTON_MASK & wakeup_pin_mask )
-			return SAILING;
-		if ( GPIO_DRIVING_BUTTON_MASK & wakeup_pin_mask )
-			return DRIVING;
-		if ( GPIO_ANCHORING_BUTTON_MASK & wakeup_pin_mask )
-			return ANCHORING;
-		ESP_LOGE( LOG_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
-		return OFF;
-	}
+	if ( firstRun ) {
+		uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
+		ESP_LOGI( LOG_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
 
-	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_GPIO ) ) {
-		int offButtonLevel = 0;
-		int sailingButtonLevel = 0;
-		int drivingButtonLevel = 0;
-		int anchoringButtonLevel = 0;
-		ESP_LOGI(LOG_TAG, "Woke up from light sleep");
-		// Repeated readings to debounce
-		for ( int i = 0; i < CONFIG_NAVLICO_DEBOUNCE_PROBES; ++i) {
-			offButtonLevel += gpio_get_level( GPIO_OFF_BUTTON );
-			sailingButtonLevel += gpio_get_level( GPIO_SAILING_BUTTON );
-			drivingButtonLevel += gpio_get_level( GPIO_DRIVING_BUTTON );
-			anchoringButtonLevel += gpio_get_level( GPIO_ANCHORING_BUTTON );
-			vTaskDelay( CONFIG_NAVLICO_DEBOUNCE_DELAY_MS / portTICK_PERIOD_MS );
-		}
-		ESP_LOGD( LOG_TAG,
-			  "Input pins have been read (offButtonLevel = %d, sailingButtonLevel = %d, drivingButtonLevel = %d, anchoringButtonLevel = %d)",
-			  offButtonLevel, sailingButtonLevel, drivingButtonLevel, anchoringButtonLevel );
-		if ( offButtonLevel > CONFIG_NAVLICO_DEBOUNCE_PROBES / 2 )
+		if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
+			ESP_LOGI( LOG_TAG, "Woke up from deep sleep" );
+			uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
+			if ( GPIO_SAILING_BUTTON_MASK & wakeup_pin_mask )
+				return SAILING;
+			if ( GPIO_DRIVING_BUTTON_MASK & wakeup_pin_mask )
+				return DRIVING;
+			if ( GPIO_ANCHORING_BUTTON_MASK & wakeup_pin_mask )
+				return ANCHORING;
+			ESP_LOGE( LOG_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
 			return OFF;
-		if ( sailingButtonLevel > CONFIG_NAVLICO_DEBOUNCE_PROBES / 2 )
-			return SAILING;
-		if ( drivingButtonLevel > CONFIG_NAVLICO_DEBOUNCE_PROBES / 2 )
-			return DRIVING;
-		if ( anchoringButtonLevel > CONFIG_NAVLICO_DEBOUNCE_PROBES / 2 )
-			return ANCHORING;
-		ESP_LOGE( LOG_TAG, "Unable to determine GPIO which caused wake-up from light sleep" );
+		}
+
+		ESP_LOGI( LOG_TAG, "Came out of cold boot; simulating off button had been pressed" );
 		return OFF;
 	}
 
-	ESP_LOGI( LOG_TAG, "Came out of cold boot; simulating off button had been pressed" );
+	uint_fast8_t offButtonLevel = 0;
+	uint_fast8_t sailingButtonLevel = 0;
+	uint_fast8_t drivingButtonLevel = 0;
+	uint_fast8_t anchoringButtonLevel = 0;
+	ESP_LOGI(LOG_TAG, "Woke up from light sleep or invoked from runtime context switch");
+	// Repeated readings to debounce
+	usleep( initialDebounceDelay );
+	for ( uint_fast8_t i = 0; i < debounceProbes; ++i) {
+		offButtonLevel += gpio_get_level( GPIO_OFF_BUTTON );
+		sailingButtonLevel += gpio_get_level( GPIO_SAILING_BUTTON );
+		drivingButtonLevel += gpio_get_level( GPIO_DRIVING_BUTTON );
+		anchoringButtonLevel += gpio_get_level( GPIO_ANCHORING_BUTTON );
+		usleep( inbetweenDebounceDelay );
+	}
+	ESP_LOGD( LOG_TAG,
+		  "Input pins have been read "
+		  "(offButtonLevel = %" PRIuFAST8 ", sailingButtonLevel = %" PRIuFAST8
+		  ", drivingButtonLevel = %" PRIuFAST8 ", anchoringButtonLevel = %" PRIuFAST8 ")",
+		  offButtonLevel, sailingButtonLevel, drivingButtonLevel, anchoringButtonLevel );
+	if ( offButtonLevel > debounceProbes / 2 )
+		return OFF;
+	if ( sailingButtonLevel > debounceProbes / 2 )
+		return SAILING;
+	if ( drivingButtonLevel > debounceProbes / 2 )
+		return DRIVING;
+	if ( anchoringButtonLevel > debounceProbes / 2 )
+		return ANCHORING;
+	ESP_LOGE( LOG_TAG, "Unable to determine active input GPIO" );
 	return OFF;
+}
+
+/**
+ * Waits until all input pins have become idle
+ */
+void wait_for_idle_input( void ) {
+	while ( gpio_get_level(GPIO_OFF_BUTTON) == 1 ||
+	        gpio_get_level(GPIO_SAILING_BUTTON) == 1 ||
+	        gpio_get_level(GPIO_DRIVING_BUTTON) == 1 ||
+	        gpio_get_level(GPIO_ANCHORING_BUTTON) == 1 ) {
+		vTaskDelay( 10 / portTICK_PERIOD_MS );
+	}
 }
 
 /**
@@ -376,12 +394,18 @@ void app_main(void) {
 	setup_input_pins();
 	setup_output_pins();
 
+	// After cold boot or deep sleep
 	log_deep_sleep_duration();
-	do {
-		operational_state = read_input_pins();
+	operational_state = read_input_pins( true );
+	write_output_pins();
+	wait_for_idle_input();
+
+	// If `hibernate` goes into deep sleep, the loop is not executed, as `hibernate` does not return.
+	// Waking up from deep sleep will enter `app_main` from the start.
+	// Only if `hibernate` goes into light sleep, `hibernate` returns and the loop is executed.
+	while ( hibernate() == ESP_OK ) {
+		operational_state = read_input_pins( false );
 		write_output_pins();
-		// Wait a little until the buttons become released, otherwise hibernation will fail
-		// TODO: Don't wait a fixed amount of time, but actively check and wait until user releases buttons again
-		vTaskDelay( delayTicks );
-	} while ( hibernate() == ESP_OK );
+		wait_for_idle_input();
+	}
 }

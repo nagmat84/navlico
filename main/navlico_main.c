@@ -197,6 +197,15 @@ void setup_output_pins( void ) {
  * @return The currently or most recently pressed button.
  */
 navlico_operational_state_t read_input_pins( bool const firstRun ) {
+	// A button typical bounces between 0.1ms and 10ms while being pressed down.
+	// Source: https://www.mikrocontroller.net/articles/Entprellung
+	// After 20ms even the worst button should have stabilized.
+	// Hence, this function initially waits for 20ms and then takes 5 readings at 2ms intervals, i.e. 5 readings between
+	// 20ms and 30ms.
+	// Professional typists achieve at most 120 words (à 5 letters) per minutes.
+	// This yields 60s/(120*5) = 100ms per keystroke.
+	// Hence, 30ms < 100ms is still short enough.
+	// Source: https://en.wikipedia.org/wiki/Words_per_minute
 	static constexpr uint_fast8_t debounceProbes = 5;
 	static constexpr useconds_t initialDebounceDelay = 20000;
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;

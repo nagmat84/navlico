@@ -1,0 +1,33 @@
+menu "Navlico Configuration"
+
+    config NAVLICO_MIN_FREQ
+        int "Minimum CPU frequency for idle state"
+        default 16
+        help
+            This parameter denotes the minimum CPU frequency (MHz), i.e.,
+            the CPU's operating frequency when the system is in an idle state.
+            This field can be set to the crystal oscillator (XTAL) frequency value
+            or the XTAL frequency value divided by an integer.
+            See https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/low-power-mode/low-power-mode-soc.html#dfs-configuration
+            Note that 10 MHz is the minimum frequency required for generating a 1 MHz REF_TICK default clock.
+            See https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/power_management.html#configuration
+
+    config NAVLICO_DEBOUNCE_PROBES
+        int "Number of consecutive measurement probes"
+        default 5
+        help
+            Specifies how many consecutive measurement probes Navlico takes on input pins for debouncing.
+            Navlico makes a majority decision whether the input is interpreted as 0 or 1.
+
+    config NAVLICO_DEBOUNCE_DELAY_MS
+        int "Time period between consecutive measurement probes"
+        default 5
+        help
+            Specifies the delay in milliseconds between two consecutive measurement probes on the input pins.
+
+endmenu
+
+config NAVLICO_HAS_SLEEP_TIMES
+    bool
+    default y if LOG_MAXIMUM_LEVEL_DEBUG || LOG_DEFAULT_LEVEL_DEBUG || LOG_MAXIMUM_LEVEL_VERBOSE || LOG_DEFAULT_LEVEL_VERBOSE
+    depends on LOG_MAXIMUM_LEVEL_DEBUG || LOG_DEFAULT_LEVEL_DEBUG || LOG_MAXIMUM_LEVEL_VERBOSE || LOG_DEFAULT_LEVEL_VERBOSE

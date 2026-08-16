@@ -9,6 +9,7 @@ Navlico (short for “Navigation Light Control”) is a small, embedded program 
  3. [Configuring the Project](doc/configuring-project.md)
  4. Setting up the IDE
      1. [Setting up LionC](doc/setting-up-lionc.md)
+ 5. [Selected Implementation Aspects](doc/selected-impl-aspects.md) 
 
 ## References
 
@@ -24,3 +25,7 @@ Navlico (short for “Navigation Light Control”) is a small, embedded program 
     - [ESP32-H2 Programming Guidelines](https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32h2/download-guidelines.html)
     - [ESP32-H2 Module Mini 1(U)](https://documentation.espressif.com/esp32-h2-mini-1_mini-1u_datasheet_en.pdf)
     - [ESP32-H2 Module WROOM 02C](https://documentation.espressif.com/esp32-h2-wroom-02c_datasheet_en.pdf)
+
+## Coding Standard
+
+- This project uses the **GNU dialect of ISO C23** (`--std=gnu23`) which is the current [default C version in ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/c.html#c-version).

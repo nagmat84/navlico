@@ -1,0 +1,114 @@
+CONFIG_NAVLICO_MIN_FREQ=16
+
+# CPU frequency
+#
+# CPU frequency to be set on application startup.
+#
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-esp-default-cpu-freq-mhz
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_48=y
+
+CONFIG_PM_ENABLE=y
+
+# Place Power Management module functions in IRAM
+#
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-sleep-func-in-iram
+CONFIG_PM_SLEEP_FUNC_IN_IRAM=y
+
+# Enable dynamic frequency scaling (DFS) at startup
+#
+# If enabled, startup code configures dynamic frequency scaling.
+# Max CPU frequency is set to DEFAULT_CPU_FREQ_MHZ setting,
+# min frequency is set to XTAL frequency.
+# If disabled, DFS will not be active # until the application configures it
+# using esp_pm_configure function.
+#
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-dfs-init-auto
+CONFIG_PM_DFS_INIT_AUTO=y
+
+# Put lightsleep related codes in internal RAM
+#
+# If enabled, about 2.1KB of lightsleep related source code would be in IRAM
+# and chip would sleep longer for 310us at 160MHz CPU frequency most each time.
+# This feature is intended to be used when lower power consumption is needed
+# while there is enough place in IRAM to place source code.
+#
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-iram-opt
+CONFIG_PM_SLP_IRAM_OPT=y
+
+# Calibrate the RTC_FAST/SLOW clock every N times of light sleep
+#
+# The value of this option determines the calibration interval of the RTC_FAST/SLOW clock
+# during sleep when power management is enabled.
+# When it is configured as N, the RTC_FAST/SLOW clock will be calibrated every N times of lightsleep.
+# Decreasing this value will increase the time the chip is in the active state,
+# thereby increasing the average power consumption of the chip.
+# Increasing this value can reduce the average power consumption,
+# but when the external environment changes drastically
+# and the chip RTC_FAST/SLOW oscillator frequency drifts,
+# it may cause system instability.
+#
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-lightsleep-rtc-osc-cal-interval
+CONFIG_PM_LIGHTSLEEP_RTC_OSC_CAL_INTERVAL=1
+
+# Put RTOS IDLE related codes in internal RAM
+#
+# If enabled, about 180Bytes of RTOS_IDLE related source code would be in IRAM
+# and chip would sleep longer for 20us at 160MHz CPU frequency most each time.
+# This feature is intended to be used when lower power consumption is needed
+# while there is enough place in IRAM to place source code.
+# 
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-rtos-idle-opt
+CONFIG_PM_RTOS_IDLE_OPT=y
+
+# Disable all GPIO when chip at sleep
+#
+# This feature is intended to disable all GPIO pins at automantic sleep
+# to get a lower power mode.
+# If enabled, chips will disable all GPIO pins at automantic sleep
+# to reduce about 200~300 uA current.
+# If you want to specifically use some pins normally as chip wakes when chip sleeps,
+# you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
+# You can also keep this feature on
+# and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
+# to have a different GPIO configuration at sleep.
+#
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-disable-gpio
+CONFIG_PM_SLP_DISABLE_GPIO=y
+
+# RTC clock source
+#
+# Choose which clock is used as RTC clock source.
+#
+# https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-rtc-clk-src
+#
+# Taken from Espressif example "deep_sleep".
+CONFIG_RTC_CLK_SRC_INT_RC=y
+
+# Use tickless idle
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+
+# Validation of Boot Loader Coming From Deep Sleep
+#
+# This option allows the wake-up time from Deep-sleep to be reduced (useful for reducing power consumption).
+# The reduction in time is achieved by ignoring image verification.
+# During the first boot, the bootloader stores the address of the application being launched in the RTC FAST memory.
+# After waking up from deep sleep, this address is used to boot the application again without any checks,
+# resulting in a significantly faster load.
+#
+# https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/bootloader.html#fast-boot-from-deep-sleep
+#
+# Taken from Espressif example "deep_sleep".
+CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP=y
+
+# Timers used for gettimeofday function
+#
+# This setting defines which hardware timers are used to implement 'gettimeofday' and 'time' functions in C library.
+#
+# If both high-resolution and RTC timers are used, timekeeping will continue in deep sleep.
+# Time will be reported at 1 microsecond resolution.
+# This is the default, and the recommended option.
+#
+# https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/kconfig-reference.html#config-libc-time-syscall
+#
+# Taken from Espressif example "deep_sleep".
+CONFIG_LIBC_TIME_SYSCALL_USE_RTC_HRT=y

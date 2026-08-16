@@ -1,0 +1,11 @@
+# Documentation: https://docs.espressif.com/projects/idf-component-manager/en/latest/reference/manifest_file.html
+
+description: "Navlico (short for “Navigation Light Control”) is a small, embedded program for the Espressif ESP32-H2 to control the navigation lights on a leisure boat."
+version: "0.0.1"
+license: "GPL-3.0-only"
+maintainers:
+  - "Matthias Nagel <matthias.nagel@mhnnet.de>"
+url: "https://github.com/nagmat84/navlico"
+repository: "https://github.com/nagmat84/navlico.git"
+files:
+  use_gitignore: true

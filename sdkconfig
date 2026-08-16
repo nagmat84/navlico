@@ -1017,10 +1017,6 @@ CONFIG_PARTITION_TABLE_MD5=y
 # Navlico Configuration
 #
 CONFIG_NAVLICO_MIN_FREQ=32
-# default:
-CONFIG_NAVLICO_DEBOUNCE_PROBES=5
-# default:
-CONFIG_NAVLICO_DEBOUNCE_DELAY_MS=5
 # end of Navlico Configuration
 
 # default:

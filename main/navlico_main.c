@@ -1,6 +1,6 @@
 /** \file navlico_main.c
  * The main file of Navlico.
-*/
+ */
 
 #include <sys/time.h>
 #include <sys/unistd.h>
@@ -16,24 +16,41 @@
 #include "gpio_defs.h"
 #include "common_defs.h"
 
-typedef enum navigation_lights_state_t_impl {
-	OFF = 0,
-	SAILING = 1,
-	DRIVING = 2,
-	ANCHORING = 3
-} navigation_lights_state_t;
+/**
+ * Enum to define the operational state
+ *
+ * The operational state directly corresponds to the most recently pressed button and active indicator light.
+ */
+typedef enum navlico_operational_state_t_impl {
+	OFF = 0,      ///< The user has pressed the OFF button, the operational state is OFF
+	SAILING = 1,  ///< The user has pressed the SAILING button, the operational state is SAILING
+	DRIVING = 2,  ///< The user has pressed the DRIVING button, the operational state is DRIVING
+	ANCHORING = 3 ///< The user has pressed the ANCHORING button, the operational state is ANCHORING
+} navlico_operational_state_t;
 
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
+/// Timestamp when program entered deep sleep for the last time
 RTC_DATA_ATTR static struct timeval deep_sleep_enter_time;
+/// Timestamp when program entered light sleep for the last time
 RTC_DATA_ATTR static struct timeval light_sleep_enter_time;
 #endif
 
-RTC_DATA_ATTR static navigation_lights_state_t navigation_light_state;
+/// The active operational state
+RTC_DATA_ATTR static navlico_operational_state_t operational_state;
 
+/**
+ * Amount of ticks to wait for input buttons to stabilize and become released again
+ *
+ * TODO: Don't use a fix time period, but actively monitor and wait until user has released buttons again
+ */
 static constexpr TickType_t delayTicks = 50;
 
-//static TaskHandle_t main_task_handle = nullptr;
-
+/**
+ * Logs the duration since last deep sleep.
+ *
+ * The function only logs a message if the log level is DEBUG or higher.
+ * This functions is a no-op if build configuration disables debug logs.
+ */
 void log_deep_sleep_duration( void ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
 	struct timeval now;
@@ -43,6 +60,12 @@ void log_deep_sleep_duration( void ) {
 #endif
 }
 
+/**
+ * Logs the duration since last light sleep.
+ *
+ * The function only logs a message if the log level is DEBUG or higher.
+ * This functions is a no-op if build configuration disables debug logs.
+ */
 void log_light_sleep_duration( void ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
 	struct timeval now;
@@ -55,7 +78,7 @@ void log_light_sleep_duration( void ) {
 /**
  * Sets up (Enables) Power Management
  *
- * Sets a lower minimum CPU frequency (`CONFIG_NAVLICO_MIN_FREQ`) and enables support for light sleep.
+ * Sets a lower minimum CPU frequency (`CONFIG_NAVLICO_MIN_FREQ`) and enables support for automatic light sleep.
  *
  * Also see [Espressif: API Guides - Low Power Modes - DFS Configuration](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/low-power-mode/low-power-mode-soc.html#dfs-configuration).
  */
@@ -78,21 +101,16 @@ void setup_power_management( void ) {
 /**
  * Configures the Input Pins
  *
- * The ESP32-H2 lacks the `RTC_PERIPH` power domain and does not provide the special functions `rtc_gpio_...`.
- * Only the regular `gpio_...` functions are available.
- * See `components/esp_hw_support/include/esp_sleep.h` and
- * [Espressif: ESP32-H2 - Technical Reference Manual, Sec. 6.11.1](https://documentation.espressif.com/esp32-h2_technical_reference_manual_en.pdf)
- * for available power domains.
- * This implies that input pins only support the HOLD function which latches the last input state before the
- * controller goes into deep sleep. See [Espressif: ESP32-H2 - Technical Reference Manual, Sec. 6.9](https://documentation.espressif.com/esp32-h2_technical_reference_manual_en.pdf)
- * > Each GPIO pin (including the LP pins: GPIO8 ~ GPIO14) has an individual hold function controlled by an LP register.
- * > When the pin is set to hold, the state is latched at that moment and will not change
- * > no matter how the internal signals change or how the IO MUX/GPIO configuration is modified.
- * > Users can use the hold function for the pins to retain the pin state through a core reset
- * > triggered by watchdog time-out or Deep-sleep events.
- * If the controller supported the `RTC_PERIPH` domain, then we had to call
- * `esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF)` explicitly in order to power down the that domain
- * during deep sleep despite setting the internal pull-down and latching the last state.
+ * The code relies on external pull-down resistors.
+ *
+ * The ESP32-H2 lacks the `RTC_PERIPH` power domain and hence does not provide the special functions `rtc_gpio_...`.
+ * The ESP32-H2 supports the HOLD function but this only latches the most recently read value form the input pin into
+ * an internal register and isolates the GPIO peripheral from the pin.
+ * The HOLD function does not actively pull down the input pin and any noise will trigger an immediate wake-up.
+ *
+ * As a pre-cautionary action, this function calls `gpio_sleep_sel_dis` on the input pins.
+ * Without `gpio_sleep_sel_dis` and if `CONFIG_PM_SLP_DISABLE_GPIO` was set, the GPIOs would lose their input function
+ * when the controller goes to light sleep.
  */
 void setup_input_pins( void ) {
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
@@ -100,14 +118,6 @@ void setup_input_pins( void ) {
 		gpio_dump_io_configuration( stdout, GPIO_ALL_BUTTONS_MASK );
 #endif
 
-	/* We enable the internal pull-downs on the input pins such that the ESP-IDF framework latches (aka hold) the
-	 * last known state of the input pins before deep sleep.
-	 * Note that we explicitly disabled the `RTC_PERIPH` power domain also for chips which support them.
-	 * Hence, the internal pull-down will always lose their function in deep sleep for any kind of chip.
-	 * An external pull-down is always required.
-	 * Setting the internal pull-down is merely a workaround to latch/hold the last-known good state as the ESP-IDF
-	 * framework has no dedicated API call for that.
-	 */
 	const gpio_config_t config = {
 		.pin_bit_mask = GPIO_ALL_BUTTONS_MASK,
 		.mode = GPIO_MODE_INPUT,
@@ -136,6 +146,11 @@ void setup_input_pins( void ) {
 
 /**
  * Configures the Output Pins
+ *
+ * As a pre-cautionary action, this function calls `gpio_sleep_sel_dis` on the output pins.
+ * Without `gpio_sleep_sel_dis` and if `CONFIG_PM_SLP_DISABLE_GPIO` was set, the GPIOs would be isolated when the
+ * controller goes to light sleep and the external MOSFET would slowly discharge each output pin as they are not
+ * actively driven.
  */
 void setup_output_pins( void ) {
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
@@ -172,16 +187,17 @@ void setup_output_pins( void ) {
 #endif
 }
 
-/*void handle_gpio_interrupt( void* ) {
-	vTaskResume( main_task_handle );
-}
-
-void setup_isr( void ) {
-	main_task_handle = xTaskGetCurrentTaskHandle();
-	gpio_isr_register( handle_gpio_interrupt, nullptr, ESP_INTR_FLAG_HIGH | ESP_INTR_FLAG_SHARED, nullptr );
-}*/
-
-navigation_lights_state_t read_input_pins( void ) {
+/**
+ * Reads the input pins and returns the currently or most recently pressed button.
+ *
+ * This function is called whenever the inputs should be handled:
+ *  - after cold boot
+ *  - after waking-up from deep sleep
+ *  - after waking-up from light sleep
+ *
+ *  @return The currently or most recently pressed button.
+ */
+navlico_operational_state_t read_input_pins( void ) {
 	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
 	ESP_LOGI( LOG_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
 
@@ -231,8 +247,13 @@ navigation_lights_state_t read_input_pins( void ) {
 	return OFF;
 }
 
+/**
+ * Writes the output pins according to the current operational state.
+ *
+ * This function uses the currently stored operational state in #operational_state to set the output pins.
+ */
 void write_output_pins( void ) {
-	switch ( navigation_light_state ) {
+	switch ( operational_state ) {
 		case OFF:
 			ESP_LOGI( LOG_TAG, "New navigation light state: OFF" );
 			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
@@ -273,21 +294,14 @@ void write_output_pins( void ) {
 }
 
 /**
- * Updates the navigation light state by reading the GPIO input and setting GPIO output accordingly
+ * Attempts to go into deep sleep.
  *
- * This function is called whenever the inputs should be handled:
- *  - after cold boot
- *  - after waking-up from deep sleep
- *  - after waking-up from light sleep
- *  - after the interrupt-service routine (ISR) released the main task from suspension
+ * This function is a wrapper around `esp_deep_sleep_try_to_start()`.
+ * As a preliminary step, the function ensures that the GPIOs are set as a wake-up source, but nothing else.
+ *
+ * @return Result of the underlying `esp_deep_sleep_try_to_start()`.
  */
-void update_state( void ) {
-	ESP_LOGD( LOG_TAG, "Updating state" );
-	navigation_light_state = read_input_pins();
-	write_output_pins();
-}
-
-bool sleep_deeply( void ) {
+esp_err_t sleep_deeply( void ) {
 	ESP_LOGD( LOG_TAG, "Enabling EXT1 wake-up on input pins for buttons" );
 	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
 	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_HIGH ) );
@@ -298,7 +312,15 @@ bool sleep_deeply( void ) {
 	return esp_deep_sleep_try_to_start();
 }
 
-bool sleep_lightly( void ) {
+/**
+ * Attempts to go into deep sleep.
+ *
+ * This function is a wrapper around `esp_light_sleep_start()`.
+ * As a preliminary step, the function ensures that the GPIOs are set as a wake-up source, but nothing else.
+ *
+ * @return Result of the underlying `esp_light_sleep_start()`.
+ */
+esp_err_t sleep_lightly( void ) {
 	ESP_LOGD( LOG_TAG, "Enabling GPIO wake-up on input pins for buttons" );
 	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_OFF_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
@@ -319,24 +341,32 @@ bool sleep_lightly( void ) {
 	return esp_light_sleep_start();
 }
 
-bool hibernate( void ) {
-	esp_err_t const sleep_error = navigation_light_state == OFF ? sleep_deeply() : sleep_lightly();
+/**
+ * Attempts to go into light or deep sleep depending on the current operational state.
+ *
+ * If the current operational state if `OFF`,
+ * this function attempts to go into deep sleep by calling ::sleep_deeply().
+ * Else, this function attempts to go into light sleep by calling ::sleep_lightly().
+ *
+ * @return Result of the underlying ::sleep_deeply() or ::sleep_lightly().
+ */
+esp_err_t hibernate( void ) {
+	esp_err_t const sleep_error = operational_state == OFF ? sleep_deeply() : sleep_lightly();
 	switch ( sleep_error ) {
 		case ESP_ERR_SLEEP_REJECT:
-			ESP_LOGE( LOG_TAG, "%s sleep rejected as wake-up source already set", navigation_light_state == OFF ? "Deep" : "Light" );
-			return false;
+			ESP_LOGE( LOG_TAG, "%s sleep rejected as wake-up source already set", operational_state == OFF ? "Deep" : "Light" );
+			return sleep_error;
 		case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
-			ESP_LOGE( LOG_TAG, "%s sleep rejected as period would be too short", navigation_light_state == OFF ? "Deep" : "Light" );
-			return false;
+			ESP_LOGE( LOG_TAG, "%s sleep rejected as period would be too short", operational_state == OFF ? "Deep" : "Light" );
+			return sleep_error;
 		case ESP_OK:
 			log_light_sleep_duration();
-			return true;
+			return ESP_OK;
 		default:
-			ESP_LOGE( LOG_TAG, "%s sleep failed with unknown reason", navigation_light_state == OFF ? "Deep" : "Light" );
-			return false;
+			ESP_LOGE( LOG_TAG, "%s sleep failed with unknown reason", operational_state == OFF ? "Deep" : "Light" );
+			return sleep_error;
 	}
 }
-
 
 /**
  * The main task of Navlico
@@ -345,13 +375,13 @@ void app_main(void) {
 	setup_power_management();
 	setup_input_pins();
 	setup_output_pins();
-	//setup_isr();
 
 	log_deep_sleep_duration();
 	do {
-		update_state();
+		operational_state = read_input_pins();
+		write_output_pins();
 		// Wait a little until the buttons become released, otherwise hibernation will fail
 		// TODO: Don't wait a fixed amount of time, but actively check and wait until user releases buttons again
 		vTaskDelay( delayTicks );
-	} while ( hibernate() );
+	} while ( hibernate() == ESP_OK );
 }

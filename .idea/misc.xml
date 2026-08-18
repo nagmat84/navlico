@@ -4,5 +4,10 @@
     <option name="pythonIntegrationState" value="YES" />
   </component>
   <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
-  <component name="WestSettings"><![CDATA[{}]]></component>
+  <component name="CidrRootsConfiguration">
+    <libraryRoots>
+      <file path="$USER_HOME$/.espressif/v6.0.2/esp-idf" />
+    </libraryRoots>
+  </component>
+  <component name="WestSettings">{}</component>
 </project>

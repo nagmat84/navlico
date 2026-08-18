@@ -4,12 +4,18 @@ Navlico (short for “Navigation Light Control”) is a small, embedded program 
 
 ## Table of Content
 
- 1. [Setting up the Build Environment](doc/setting-up-build-environment.md)
- 2. [Working with the Build Environment](doc/using-build-environment.md)
- 3. [Configuring the Project](doc/configuring-project.md)
- 4. Setting up the IDE
-     1. [Setting up LionC](doc/setting-up-lionc.md)
- 5. [Selected Implementation Aspects](doc/selected-impl-aspects.md) 
+1. [Setting up the Build Environment](doc/setting-up-build-environment.md)
+2. [Working with the Build Environment](doc/using-build-environment.md)
+3. [Configuring the Project](doc/configuring-project.md)
+4. Setting up the IDE
+   1. [Setting up LionC](doc/setting-up-lionc.md)
+5. [Selected Implementation Aspects](doc/selected-impl-aspects.md)
+   1. [Finite-State Machine](doc/fsm.md)
+   2. Hardware Implementation
+      1. [Hardware Implementation — Pin Assignment and GPIOs](doc/hw-impl-pin-assignment.md)
+      2. [Hardware Implementation — Component Selection and Dimensioning](doc/hw-impl-comp-selection.md)
+   3. Software Implementation
+      1. [Software Implementation — Power Management for Low Power Consumption](doc/sw-impl-pwr-mgmt.md) 
 
 ## References
 

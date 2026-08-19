@@ -1,5 +1,3 @@
-CONFIG_NAVLICO_MIN_FREQ=16
-
 # CPU frequency
 #
 # CPU frequency to be set on application startup.

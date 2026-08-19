@@ -21,18 +21,26 @@ The ESP32-H2 shows the following electrical GPIO characteristics
 
 ## Electrical Design of Input/Output Pins
 
-We use **combined input/outputs** pins in **open-drain mode** with a **level shifter** and **high-side switching** of the loads as shown in the following high-level schematics.
+We use three different GPIO configurations:
+ - **Input-only** pins which are externally pulled up when inactive and pulled down to GND via a switch when active.
+ - **Output-only** pins in **push-pull mode** and **low-side switching**
+ - **Combined input/outputs** pins in **open-drain mode** with a **level shifter** and **high-side switching**
+
+We use external pull-up/down resistors as ESP32-H2's internal resistors don't work in deep sleep.
+We use output-only in push-pull mode for outputs which require fast switching such as the indicator lights with PWM dimming.
+Active push-pull charges/discharges the parasitic capacitance of a single N-MOSFET much faster than passive pull-up/down resistor.
+This allows robust PWM dimming.
+The ESP32-H2 reconfigures GPIOs to push-pull mode when it routes the PWM peripheral to the GPIO anyway.
+We use combined input/outputs in open-drain mode with a level shifter and high-side switching for outputs which only need slow changes.
+Combined input/outputs saves some GPIOs.
+
 See
 [Penguin Tutor: Electronic Cicuit Design - MOSFET logic level shift](https://www.penguintutor.com/electronics/mosfet-levelshift)
 and
 [Stack Exchange: Understanding how This Bi-Directional Logic Level Shift Works](https://electronics.stackexchange.com/questions/555631/understanding-how-this-bi-directional-logic-level-shift-works)
-for an in-depth explanation:
+for an in-depth explanation of the Combined input/outputs pins in open-drain mode with a level shifter and high-side switching:
 - Q5 acts as the level-shifter
 - Q4 is the high-side switch
-
-Pins that only realize input or output, the design omits the following components:
-- Output-only pins: R9 is omitted
-- Input-only pins: Q4 is omitted
 
 ![Open Drain Output with Level Shifter and High-Side Switching](img/open-drain-output-with-level-shifter-and-high-side-switching.png)
 
@@ -40,7 +48,6 @@ _Note:_ This simplified schematics don't show any protective TVS diodes nor capa
 **TBD:** The dimensions of the omitted capacitors and the resistors must be cross-checked with the PWM frequency.
 The resistors must be sufficiently small such that they are able to charge/discharge the capacitors incl. the parasitic
 capacitance of the MOSFETs.
-The time constant of the resistors and combined capacitance's must be significantly smaller than the PWM frequency.
 
 ## Temporary Breadboard Calculation
 

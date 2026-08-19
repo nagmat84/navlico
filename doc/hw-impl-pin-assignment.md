@@ -55,7 +55,7 @@ The columns have the following meaning:
 
 ### Strapping Pins for Boot Control (GPIO 8+9)
 
-_Summary/TLDR:_ As long as GPIO 9 remains pulled-up during boot time everything is fine and GPIO 8 can be used freely.
+_Summary/TLDR:_ As long as GPIO 9 remains pulled up during boot time everything is fine and GPIO 8 can be used freely.
 GPIO 25 has no strapping functionality by default and can be used freely, too.
 GPIO 9 can safely be used
 - as an output pin in combination with a MOSFET as long as it doesn't matter that it shortly becomes active during boot or
@@ -65,18 +65,18 @@ More precisely, the strapping functionality of the GPIO 8+9 works as follows:
 - **GPIO 9:** GPIO 9 is the most important strapping pin.
   The µC has an internal flash which stores the 1st and 2nd stage bootloader as well as the user-defined program.
   The flash is connected to the µC core via SPI.
-  That's why the strapping function is called "SPI boot" (IMHO, "normal boot" would have been a better name).
+  For that reason the strapping function is called "SPI boot" (IMHO, "normal boot" would have been a better name).
   GPIO 9 determines whether the µC
   - boots normally from its internal flash (GPIO 9 = high, default) or
   - via an alternative way (GPIO 9 = low).
   
   The µC itself pulls GPIO 9 up via it's internal 45k resistor.
-  This ensures normal SPI boot under normal conditions.
+  This ensures SPI boot under normal conditions.
   As long as GPIO 9 is high/pulled up during reset/boot time, all other strapping pins have no effect.
 - **GPIO 8:** GPIO 8 is secondary to GPIO 9 and determines what type of alternative boot method applies.
   GPIO 8 has only an effect, if and only if GPIO 9 pulled down.
-  GPIO 8 determines whether the µC
-  - accepts a download from USB-Serial-JTAG or UART (GPIO 8 = high, called "Joint Download Boot mode") or
+  GPIO 8 determines whether the
+  - µC accepts a download from USB-Serial-JTAG or UART (GPIO 8 = high, called "Joint Download Boot mode") or
   - user can directly write into the SPI flash (GPIO 8 = low, called "SPI Download Boot Mode").
   
   For the latter to work GPIO 2 and 3 must also be specifically pulled up/down.
@@ -175,9 +175,12 @@ _Rationale:_ Keeping outputs for navigational and indicator lights separate
   - dimming indicator lights via PWM in dark environments
   - testing of navigational lights via "blinking" at the end of the startup phase
 
-We use the outputs in **open-drain mode** with a **level shifter** and **high-side switching** of the loads
-(see [Hardware Implementation — Component Selection and Dimensioning](hw-impl-comp-selection.md)).
-Using outputs in open-drain mode allows us to use combined input/output pins and save some pins. 
+For the **indicator lights** we use outputs in **push-pull mode** with **low-side switching**.
+Using push-pull mode allows us to use PWM to dim the indicator lights.
+For the **navigational lights** we use the outputs in **open-drain mode** with a **level shifter** and **high-side switching**.
+Using open-drain mode allows us to use combined input/output pins and save some pins. 
+For details see  [Hardware Implementation — Component Selection and Dimensioning](hw-impl-comp-selection.md).
+
 Suitable input and output pins must meet the following criteria:
 1. Output pins must be in a steady state during each operational state
 2. Input pins can only be combined with output pins that become active during the operational state associated to the input pin
@@ -199,23 +202,23 @@ This allows us to combine the following pins:
 ### Alternative "Variant 1: Independent Full-Fledged"
 
 We do **not** realize [**Variant 1: Independent Full-Fledged**](fsm.md#variant-1-independent-full-fledged).
-This variant requires 13 GPIOs as shown in the following table (I = input, OD = ouput, open-drain):
+This variant requires 13 GPIOs as shown in the following table (I = input, O-od = output, open-draino O-pp = output, push-pull):
 
 |  # | Direction | Input Function    | Output Function         | Wake-Up From Deep Sleep |
 |---:|:---------:|:------------------|:------------------------|:-----------------------:|
 |  1 |     I     | Off Btn           |                         |                         |
 |  2 |     I     | Sailing Btn       |                         |            ✔            |
-|  3 |   I, OD   | Sailing Coast Btn | Allround Green Light    |            ✔            |
-|  4 |   I, OD   | Driving Btn       | Masthead Light          |            ✔            |
-|  5 |   I, OD   | Anchoring Btn     | Allround White Light    |            ✔            |
-|  6 |   I, OD   | Disabled Btn      | Allround Red 2 Light    |            ✔            |
-|  7 |    OD     |                   | Sailing Indicator       |                         |
-|  8 |    OD     |                   | Sailing Coast Indicator |                         |
-|  9 |    OD     |                   | Driving Indicator       |                         |
-| 10 |    OD     |                   | Anchoring Indicator     |                         |
-| 11 |    OD     |                   | Disabled Indicator      |                         |
-| 12 |    OD     |                   | Side & Stern Light      |                         |
-| 13 |    OD     |                   | Allround Red 1 Light    |                         |
+|  3 |  I, O-od  | Sailing Coast Btn | Allround Green Light    |            ✔            |
+|  4 |  I, O-od  | Driving Btn       | Masthead Light          |            ✔            |
+|  5 |  I, O-od  | Anchoring Btn     | Allround White Light    |            ✔            |
+|  6 |  I, O-od  | Disabled Btn      | Allround Red 2 Light    |            ✔            |
+|  7 |   O-pp    |                   | Sailing Indicator       |                         |
+|  8 |   O-pp    |                   | Sailing Coast Indicator |                         |
+|  9 |   O-pp    |                   | Driving Indicator       |                         |
+| 10 |   O-pp    |                   | Anchoring Indicator     |                         |
+| 11 |   O-pp    |                   | Disabled Indicator      |                         |
+| 12 |   O-od    |                   | Side & Stern Light      |                         |
+| 13 |   O-od    |                   | Allround Red 1 Light    |                         |
 
 The following table shows the pin allocation.
 The usage is assigned in a way such that
@@ -225,22 +228,22 @@ avoids dual-purpose GPIOs.
 |  GPIO # | Usage | Direction | Dual Purpose      | Low Power | Strapping Pin | Reset Behaviour | Eval Board Usage             |
 |--------:|------:|:---------:|:------------------|:---------:|:-------------:|:----------------|:-----------------------------|
 |       0 |     1 |     I     |                   |           |               |                 |                              |
-|       1 |     7 |    OD     |                   |           |               |                 |                              |
-|       2 |     9 |    OD     | JTAG (MTMS)       |           |               |                 |                              |
-|       3 |    10 |    OD     | JTAG (MTDO)       |           |               |                 |                              |
-|       4 |     8 |    OD     | JTAG Clock (MTCK) |           |               | Pulled-up       |                              |
-|       5 |    12 |    OD     | JTAG (MTDI)       |           |               |                 |                              |
+|       1 |     7 |   O-pp    |                   |           |               |                 |                              |
+|       2 |     9 |   O-pp    | JTAG (MTMS)       |           |               |                 |                              |
+|       3 |    10 |   O-pp    | JTAG (MTDO)       |           |               |                 |                              |
+|       4 |     8 |   O-pp    | JTAG Clock (MTCK) |           |               | Pulled-up       |                              |
+|       5 |    12 |   O-od    | JTAG (MTDI)       |           |               |                 |                              |
 |       8 |       |           |                   |     ✔     |   Download    |                 | Pulled up with 3.3k, RGB LED |
 |       9 |       |           |                   |     ✔     |   SPI Boot    | Pulled-up       | "Boot" Button can pull down  |
 |      10 |     2 |     I     |                   |     ✔     |               |                 |                              |
-|      11 |     4 |   I, OD   |                   |     ✔     |               |                 |                              |
-|      12 |     5 |   I, OD   |                   |     ✔     |               |                 |                              |
-|      13 |     3 |   I, OD   | XTAL_32K_P        |     ✔     |               |                 | 32k-crystal                  |
-|      14 |     6 |   I, OD   | XTAL_32K_N        |     ✔     |               |                 | 32k-crystal                  |
-|      22 |    11 |    OD     |                   |           |               |                 |                              |
+|      11 |     4 |  I, O-od  |                   |     ✔     |               |                 |                              |
+|      12 |     5 |  I, O-od  |                   |     ✔     |               |                 |                              |
+|      13 |     3 |  I, O-od  | XTAL_32K_P        |     ✔     |               |                 | 32k-crystal                  |
+|      14 |     6 |  I, O-od  | XTAL_32K_N        |     ✔     |               |                 | 32k-crystal                  |
+|      22 |    11 |   O-pp    |                   |           |               |                 |                              |
 |      23 |       |           | UART RX           |           |               | Pulled-up       | USB-to-UART (CP2102N)        |
 |      24 |       |           | UART TX           |           |               | Pulled-up       | USB-to-UART (CP2102N)        |
-|      25 |    13 |    OD     |                   |           | (JTAG Source) |                 |                              |
+|      25 |    13 |   O-od    |                   |           | (JTAG Source) |                 |                              |
 |      26 |       |           | USB D-            |           |               |                 | USB                          |
 |      27 |       |           | USB D+            |           |               | Pulled-up       | USB                          |
 
@@ -260,12 +263,12 @@ Hence, the numbers are non-consecutive.
 |---:|:---------:|:------------------|:------------------------|:-----------------------:|
 |  1 |     I     | Off Btn           |                         |                         |
 |  2 |     I     | Sailing Btn       |                         |            ✔            |
-|  4 |   I, OD   | Driving Btn       | Masthead Light          |            ✔            |
-|  5 |   I, OD   | Anchoring Btn     | Allround White Light    |            ✔            |
-|  7 |    OD     |                   | Sailing Indicator       |                         |
-|  9 |    OD     |                   | Driving Indicator       |                         |
-| 10 |    OD     |                   | Anchoring Indicator     |                         |
-| 12 |    OD     |                   | Side & Stern Light      |                         |
+|  4 |  I, O-od  | Driving Btn       | Masthead Light          |            ✔            |
+|  5 |  I, O-od  | Anchoring Btn     | Allround White Light    |            ✔            |
+|  7 |   O-pp    |                   | Sailing Indicator       |                         |
+|  9 |   O-pp    |                   | Driving Indicator       |                         |
+| 10 |   O-pp    |                   | Anchoring Indicator     |                         |
+| 12 |   O-od    |                   | Side & Stern Light      |                         |
 
 The following table shows the pin allocation.
 This table is identical to the table of the [alternative variant 1](#alternative-variant-1-independent-full-fledged),
@@ -274,16 +277,16 @@ but with the omitted usages left out.
 |  GPIO # | Usage | Direction | Dual Purpose      | Low Power | Strapping Pin | Reset Behaviour | Eval Board Usage             |
 |--------:|------:|:---------:|:------------------|:---------:|:-------------:|:----------------|:-----------------------------|
 |       0 |     1 |     I     |                   |           |               |                 |                              |
-|       1 |     7 |    OD     |                   |           |               |                 |                              |
-|       2 |     9 |    OD     | JTAG (MTMS)       |           |               |                 |                              |
-|       3 |    10 |    OD     | JTAG (MTDO)       |           |               |                 |                              |
+|       1 |     7 |   O-pp    |                   |           |               |                 |                              |
+|       2 |     9 |   O-pp    | JTAG (MTMS)       |           |               |                 |                              |
+|       3 |    10 |   O-pp    | JTAG (MTDO)       |           |               |                 |                              |
 |       4 |       |           | JTAG Clock (MTCK) |           |               | Pulled-up       |                              |
-|       5 |    12 |    OD     | JTAG (MTDI)       |           |               |                 |                              |
+|       5 |    12 |   O-od    | JTAG (MTDI)       |           |               |                 |                              |
 |       8 |       |           |                   |     ✔     |   Download    |                 | Pulled up with 3.3k, RGB LED |
 |       9 |       |           |                   |     ✔     |   SPI Boot    | Pulled-up       | "Boot" Button can pull down  |
 |      10 |     2 |     I     |                   |     ✔     |               |                 |                              |
-|      11 |     4 |   I, OD   |                   |     ✔     |               |                 |                              |
-|      12 |     5 |   I, OD   |                   |     ✔     |               |                 |                              |
+|      11 |     4 |  I, O-od  |                   |     ✔     |               |                 |                              |
+|      12 |     5 |  I, O-od  |                   |     ✔     |               |                 |                              |
 |      13 |       |           | XTAL_32K_P        |     ✔     |               |                 | 32k-crystal                  |
 |      14 |       |           | XTAL_32K_N        |     ✔     |               |                 | 32k-crystal                  |
 |      22 |       |           |                   |           |               |                 |                              |

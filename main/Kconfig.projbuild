@@ -1,8 +1,53 @@
 menu "Navlico Configuration"
 
-    config NAVLICO_MIN_FREQ
-        int "Minimum CPU frequency for idle state"
-        default 16
+    choice NAVLICO_PM_MAX_FREQ_MHZ
+        prompt "Maximum CPU frequency (MHz)"
+        default NAVLICO_PM_MAX_FREQ_MHZ_48
+        config NAVLICO_PM_MAX_FREQ_MHZ_8
+            bool "8"
+        config NAVLICO_PM_MAX_FREQ_MHZ_16
+            bool "16"
+        config NAVLICO_PM_MAX_FREQ_MHZ_32
+            bool "32"
+        config NAVLICO_PM_MAX_FREQ_MHZ_48
+            bool "48"
+        config NAVLICO_PM_MAX_FREQ_MHZ_64
+            depends on ESP_DEFAULT_CPU_FREQ_MHZ_96 || ESP_DEFAULT_CPU_FREQ_MHZ_64
+            bool "64"
+        config NAVLICO_PM_MAX_FREQ_MHZ_96
+            depends on ESP_DEFAULT_CPU_FREQ_MHZ_96
+            bool "96"
+    endchoice
+
+    config NAVLICO_PM_MAX_FREQ
+        int
+        default 8 if NAVLICO_PM_MAX_FREQ_MHZ_8
+        default 16 if NAVLICO_PM_MAX_FREQ_MHZ_16
+        default 32 if NAVLICO_PM_MAX_FREQ_MHZ_32
+        default 48 if NAVLICO_PM_MAX_FREQ_MHZ_48
+        default 64 if NAVLICO_PM_MAX_FREQ_MHZ_64
+        default 96 if NAVLICO_PM_MAX_FREQ_MHZ_96
+
+    choice NAVLICO_PM_MIN_FREQ_MHZ
+        prompt "Minimum CPU frequency (MHz)"
+        default NAVLICO_PM_MIN_FREQ_MHZ_16
+        config NAVLICO_PM_MIN_FREQ_MHZ_8
+            bool "8"
+        config NAVLICO_PM_MIN_FREQ_MHZ_16
+            depends on NAVLICO_PM_MAX_FREQ_MHZ_96 || NAVLICO_PM_MAX_FREQ_MHZ_64 || NAVLICO_PM_MAX_FREQ_MHZ_48 || NAVLICO_PM_MAX_FREQ_MHZ_32 || NAVLICO_PM_MAX_FREQ_MHZ_16
+            bool "16"
+        config NAVLICO_PM_MIN_FREQ_MHZ_32
+            depends on NAVLICO_PM_MAX_FREQ_MHZ_96 || NAVLICO_PM_MAX_FREQ_MHZ_64 || NAVLICO_PM_MAX_FREQ_MHZ_48 || NAVLICO_PM_MAX_FREQ_MHZ_32
+            bool "32"
+        config NAVLICO_PM_MIN_FREQ_MHZ_48
+            depends on NAVLICO_PM_MAX_FREQ_MHZ_96 || NAVLICO_PM_MAX_FREQ_MHZ_64 || NAVLICO_PM_MAX_FREQ_MHZ_48
+            bool "48"
+        config NAVLICO_PM_MIN_FREQ_MHZ_64
+            depends on NAVLICO_PM_MAX_FREQ_MHZ_96 || NAVLICO_PM_MAX_FREQ_MHZ_64
+            bool "64"
+        config NAVLICO_PM_MIN_FREQ_MHZ_96
+            depends on NAVLICO_PM_MAX_FREQ_MHZ_96
+            bool "96"
         help
             This parameter denotes the minimum CPU frequency (MHz), i.e.,
             the CPU's operating frequency when the system is in an idle state.
@@ -11,6 +56,16 @@ menu "Navlico Configuration"
             See https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/low-power-mode/low-power-mode-soc.html#dfs-configuration
             Note that 10 MHz is the minimum frequency required for generating a 1 MHz REF_TICK default clock.
             See https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/power_management.html#configuration
+    endchoice
+
+    config NAVLICO_PM_MIN_FREQ
+        int
+        default 8 if NAVLICO_PM_MIN_FREQ_MHZ_8
+        default 16 if NAVLICO_PM_MIN_FREQ_MHZ_16
+        default 32 if NAVLICO_PM_MIN_FREQ_MHZ_32
+        default 48 if NAVLICO_PM_MIN_FREQ_MHZ_48
+        default 64 if NAVLICO_PM_MIN_FREQ_MHZ_64
+        default 96 if NAVLICO_PM_MIN_FREQ_MHZ_96
 
 endmenu
 

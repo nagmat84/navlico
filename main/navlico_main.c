@@ -78,8 +78,8 @@ void log_light_sleep_duration( void ) {
 void setup_power_management( void ) {
 	ESP_LOGI( LOG_TAG, "Enabling DFS with %u MHz as minimum frequency", CONFIG_NAVLICO_MIN_FREQ );
 	const esp_pm_config_t pm_config = {
-		.max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
-		.min_freq_mhz = CONFIG_NAVLICO_MIN_FREQ,
+		.max_freq_mhz = 48,
+		.min_freq_mhz = 16,
 		.light_sleep_enable = true
 	};
 	ESP_ERROR_CHECK( esp_pm_configure( &pm_config ) );

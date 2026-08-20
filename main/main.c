@@ -81,6 +81,7 @@ void app_main(void) {
 	log_deep_sleep_duration();
 
 	xTaskCreate( navlico_fsm_task, NAVLICO_FSM_TAG, CONFIG_MAIN_TASK_STACK_SIZE, nullptr, 6, nullptr );
+	// ReSharper disable once CppDFAEndlessLoop
 	while( true ) {
 		// Let the higher prioritized task run
 		vTaskDelay( 0 );

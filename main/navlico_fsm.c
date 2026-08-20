@@ -25,9 +25,6 @@ RTC_DATA_ATTR static navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
 /// The handle for the Navlico FSM Task
 static TaskHandle_t navlico_fsm_task_handle;
 
-/// The handle for the GPIO ISR
-static gpio_isr_handle_t navlico_fsm_isr_handle;
-
 /**
  * Logs the duration since last light sleep.
  *
@@ -147,7 +144,11 @@ void static setup_navlico_fsm_output_pins( void ) {
  * This means `CONFIG_FREERTOS_IN_IRAM=y` must be set.
  */
 void static IRAM_ATTR handle_navlico_fsm_gpio_interrupt( void* ) {
-	xTaskResumeFromISR( navlico_fsm_task_handle );
+	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	vTaskNotifyGiveFromISR( navlico_fsm_task_handle, &xHigherPriorityTaskWoken );
+	if ( xHigherPriorityTaskWoken == pdTRUE ) {
+		vPortYieldFromISR();
+	}
 }
 
 /**
@@ -164,12 +165,11 @@ void static setup_navlico_fsm_isr( void ) {
 	esp_intr_dump( stdout );
 #endif
 	navlico_fsm_task_handle = xTaskGetCurrentTaskHandle();
-	gpio_isr_register(
-		handle_navlico_fsm_gpio_interrupt,
-		nullptr,
-		ESP_INTR_FLAG_HIGH | ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM,
-		&navlico_fsm_isr_handle
-	);
+	ESP_ERROR_CHECK( gpio_install_isr_service( ESP_INTR_FLAG_HIGH | ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM ) );
+	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_OFF_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
+	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_SAILING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
+	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_DRIVING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
+	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_ANCHORING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
 	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine registered" );
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
@@ -180,19 +180,19 @@ void static setup_navlico_fsm_isr( void ) {
 /**
  * Disables the interrupt-service routine (ISR) which has previously set up with setup_navlico_fsm_isr(void).
  */
-void static uninstall_navlico_fsm_isr( void ) {
+/*void static uninstall_navlico_fsm_isr( void ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Disabling interrupt-service routine ..." );
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		esp_intr_dump( stdout );
 #endif
-	esp_intr_disable( navlico_fsm_isr_handle );
+	ESP_ERROR_CHECK( gpio_uninstall_isr_service() );
 	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine disabled" );
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		esp_intr_dump( stdout );
 #endif
-}
+}*/
 
 /**
  * Reads the input pins and returns the currently or most recently pressed button.
@@ -200,18 +200,41 @@ void static uninstall_navlico_fsm_isr( void ) {
  * This function is called whenever the inputs should be handled:
  *  - after cold boot
  *  - after waking-up from deep sleep
+ *
+ * @return The button which was pressed to trigger the wake-up from deep sleep
+ */
+navlico_fsm_state_t static read_navlico_fsm_input_pins_after_start() {
+	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
+	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
+
+	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
+		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
+		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
+		if ( GPIO_SAILING_BUTTON_MASK & wakeup_pin_mask )
+			return SAILING;
+		if ( GPIO_DRIVING_BUTTON_MASK & wakeup_pin_mask )
+			return DRIVING;
+		if ( GPIO_ANCHORING_BUTTON_MASK & wakeup_pin_mask )
+			return ANCHORING;
+		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
+		return UNDEFINED;
+	}
+
+	ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating off button had been pressed" );
+	return OFF;
+}
+
+/**
+ * Reads the input pins and returns the currently or most recently pressed button.
+ *
+ * This function is called whenever the inputs should be handled:
  *  - after waking-up from light sleep
  *  - during normal runtime
  *  - after the interrupt-service routine (ISR) released the main task from suspension
  *
- * @param firstRun If `true`, the function does not read the current level of the input pins,
- * but reads the input level which has been latched upon boot.
- * After booting from deep-sleep users may already have released the buttons again, hence reading the current input
- * level won't give the desired result.
- * If `false`, the function reads the current level of the input pins.
  * @return The currently or most recently pressed button.
  */
-navlico_fsm_state_t static read_navlico_fsm_input_pins( bool const firstRun ) {
+navlico_fsm_state_t static read_navlico_fsm_input_pins() {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -224,27 +247,6 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins( bool const firstRun ) {
 	static constexpr uint_fast8_t debounceProbes = 5;
 	static constexpr useconds_t initialDebounceDelay = 20000;
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
-
-	if ( firstRun ) {
-		uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
-		ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
-
-		if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
-			ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
-			uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
-			if ( GPIO_SAILING_BUTTON_MASK & wakeup_pin_mask )
-				return SAILING;
-			if ( GPIO_DRIVING_BUTTON_MASK & wakeup_pin_mask )
-				return DRIVING;
-			if ( GPIO_ANCHORING_BUTTON_MASK & wakeup_pin_mask )
-				return ANCHORING;
-			ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
-			return UNDEFINED;
-		}
-
-		ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating off button had been pressed" );
-		return OFF;
-	}
 
 	uint_fast8_t offButtonLevel = 0;
 	uint_fast8_t sailingButtonLevel = 0;
@@ -337,26 +339,11 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const state ) {
 	}
 }
 
-esp_err_t static suspend_navlico_fsm( void ) {
-	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up on input pins for buttons" );
-	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
-	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_HIGH ) );
-	ESP_LOGI( NAVLICO_FSM_TAG, "Suspending ..." );
-	vTaskSuspend( nullptr );
-	return ESP_OK;
-}
-
 /**
- * Attempts to go into deep sleep.
- *
- * This function is a wrapper around `esp_light_sleep_start()`.
- * As a preliminary step, the function ensures that the GPIOs are set as a wake-up source, but nothing else.
- *
- * @return Result of the underlying `esp_light_sleep_start()`.
+ * Configures necessary wake-up sources.
  */
-esp_err_t static sleep_navlico_fsm_lightly( void ) {
+void static setup_navlico_fsm_wakeup_sources( void ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up on input pins for buttons" );
-	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_OFF_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_SAILING_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_DRIVING_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
@@ -368,38 +355,8 @@ esp_err_t static sleep_navlico_fsm_lightly( void ) {
 	// are unable to work in Deep-sleep mode, but can work in Light-sleep mode
 	// only if the power domain controlled by the XPD TOP does not power off.
 	ESP_ERROR_CHECK( esp_sleep_pd_config( ESP_PD_DOMAIN_TOP, ESP_PD_OPTION_ON ) );
-	ESP_LOGI( NAVLICO_FSM_TAG, "Going to light sleep ..." );
-	return esp_light_sleep_start();
-}
-
-/**
- * Attempts to go into light or deep sleep depending on the current operational state.
- *
- * If the current operational state if `OFF`,
- * this function attempts to go into deep sleep by calling ::sleep_deeply().
- * Else, this function attempts to go into light sleep by calling ::sleep_lightly().
- *
- * @return Result of the underlying ::sleep_deeply() or ::sleep_lightly().
- */
-esp_err_t static yield_navlico_fsm( void ) {
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-	gettimeofday( &navlico_fsm_yield_enter_time, nullptr );
-#endif
-	esp_err_t const sleep_error = navlico_fsm_state == OFF ? suspend_navlico_fsm() : sleep_navlico_fsm_lightly();
-	switch ( sleep_error ) {
-		case ESP_ERR_SLEEP_REJECT:
-			ESP_LOGE( NAVLICO_FSM_TAG, "Light sleep rejected as wake-up source already set" );
-			return sleep_error;
-		case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
-			ESP_LOGE( NAVLICO_FSM_TAG, "Light sleep rejected as period would be too short" );
-			return sleep_error;
-		case ESP_OK:
-			log_navlico_fsm_yield_duration();
-			return ESP_OK;
-		default:
-			ESP_LOGE( NAVLICO_FSM_TAG, "Yield (light sleep or suspending) failed with unknown reason" );
-			return sleep_error;
-	}
+	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up on input pins for buttons" );
+	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_HIGH ) );
 }
 
 /**
@@ -423,11 +380,17 @@ navlico_fsm_state_t get_navlico_fsm_state( void ) {
  * This is a safety precaution in case another task calls get_navlico_fsm_state() asynchronously and concurrently
  * while this function is in the middle of updating the output pins to indicate that the there is no consistent state yet.
  *
- * @param firstRun Passed on to read_input_pins(bool) and determines how read_input_pins(bool) determines the new state.
+ * @param firstRun If `true`, the function calls read_navlico_fsm_input_pins_after_start(void)
+ * which reads the input level which has been latched upon boot.
+ * After booting from deep-sleep users may already have released the buttons again, hence reading the current input
+ * level won't give the desired result.
+ * If `false`, the function calls read_navlico_fsm_input_pins(void) which reads the current level of the input pins.
  */
 void update_navlico_fsm_state( bool firstRun ) {
 	navlico_fsm_state = UNDEFINED;
-	navlico_fsm_state_t const new_state = read_navlico_fsm_input_pins( firstRun );
+	navlico_fsm_state_t const new_state = firstRun ?
+		read_navlico_fsm_input_pins_after_start() :
+		read_navlico_fsm_input_pins();
 	write_navlico_fsm_output_pins( new_state );
 	wait_for_navlico_fsm_idle_input();
 	navlico_fsm_state = new_state;
@@ -436,17 +399,17 @@ void update_navlico_fsm_state( bool firstRun ) {
 void navlico_fsm_task( void* ) {
 	setup_navlico_fsm_input_pins();
 	setup_navlico_fsm_output_pins();
+	setup_navlico_fsm_wakeup_sources();
 	setup_navlico_fsm_isr();
 
-	// First run action
+	// Update (initialize) state after boot (either cold boot or wake-up from deep sleep)
 	update_navlico_fsm_state( true );
 
-	// If `yield` suspends ourselves, the loop is not executed, as `yield` does not return.
-	// Resuming from suspension will enter `navlico_fsm_task` from the start.
-	// Only if `yield` goes into light sleep, `yield` returns and the loop is executed.
-	while ( yield_navlico_fsm() == ESP_OK ) {
+	// ReSharper disable once CppDFAEndlessLoop
+	while ( true ) {
+		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		update_navlico_fsm_state( false );
 	}
 
-	uninstall_navlico_fsm_isr();
+	//uninstall_navlico_fsm_isr();
 }

@@ -1,9 +1,10 @@
-/** \file gpio_defs.h
-* Defines GPIO pin assignments.
-*/
+/// \file navlico_gpio_defs.h
+/// Defines GPIO pin assignments for Navlico's Finite-State Machine (FSM).
 
 #ifndef NAVLICO_GPIO_DEFS_H
 #define NAVLICO_GPIO_DEFS_H
+
+#include <driver/gpio.h>
 
 static constexpr gpio_num_t GPIO_OFF_BUTTON = GPIO_NUM_0;
 static constexpr gpio_num_t GPIO_SAILING_BUTTON = GPIO_NUM_10;

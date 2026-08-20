@@ -1,93 +1,43 @@
-/** \file navlico_main.c
- * The main file of Navlico.
- */
+/// \file main.c
+/// Implements the Finite State Machine (FSM) handle the operational state and the associated GPIOs.
 
-#include <sys/time.h>
-#include <sys/unistd.h>
-#include <sys/_timeval.h>
-
-#include "esp_log.h"
-#include "esp_pm.h"
-#include "esp_sleep.h"
+#include "navlico_fsm.h"
+#include "navlico_gpio_defs.h"
 #include "sdkconfig.h"
-#include "driver/gpio.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "gpio_defs.h"
-#include "common_defs.h"
+#include <esp_attr.h>
+#include <esp_log.h>
+#include <esp_sleep.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <sys/time.h>
+#include <unistd.h>
 
-/**
- * Enum to define the operational state
- *
- * The operational state directly corresponds to the most recently pressed button and active indicator light.
- */
-typedef enum navlico_operational_state_t_impl {
-	OFF = 0,      ///< The user has pressed the OFF button, the operational state is OFF
-	SAILING = 1,  ///< The user has pressed the SAILING button, the operational state is SAILING
-	DRIVING = 2,  ///< The user has pressed the DRIVING button, the operational state is DRIVING
-	ANCHORING = 3 ///< The user has pressed the ANCHORING button, the operational state is ANCHORING
-} navlico_operational_state_t;
+char const * const NAVLICO_FSM_TAG = "navlico_fsm";
 
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-/// Timestamp when program entered deep sleep for the last time
-RTC_DATA_ATTR static struct timeval deep_sleep_enter_time;
 /// Timestamp when program entered light sleep for the last time
-RTC_DATA_ATTR static struct timeval light_sleep_enter_time;
+RTC_DATA_ATTR static struct timeval navlico_fsm_yield_enter_time;
 #endif
 
 /// The active operational state
-RTC_DATA_ATTR static navlico_operational_state_t operational_state;
-
-/**
- * Logs the duration since last deep sleep.
- *
- * The function only logs a message if the log level is DEBUG or higher.
- * This functions is a no-op if build configuration disables debug logs.
- */
-void log_deep_sleep_duration( void ) {
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-	struct timeval now;
-	gettimeofday( &now, nullptr );
-	long long const sleep_time_ms = (now.tv_sec - deep_sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - deep_sleep_enter_time.tv_usec) / 1000;
-	ESP_LOGD( LOG_TAG, "Spend %lldms in deep sleep", sleep_time_ms );
-#endif
-}
+RTC_DATA_ATTR static navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
 
 /**
  * Logs the duration since last light sleep.
  *
  * The function only logs a message if the log level is DEBUG or higher.
  * This functions is a no-op if build configuration disables debug logs.
+ *
+ * TODO: Don't let this individual component decide about sleep mode. This should be moved to the idle task.
  */
-void log_light_sleep_duration( void ) {
+void log_navlico_fsm_yield_duration( void ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-	struct timeval now;
-	gettimeofday( &now, nullptr );
-	long long const sleep_time_ms = (now.tv_sec - light_sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - light_sleep_enter_time.tv_usec) / 1000;
-	ESP_LOGD( LOG_TAG, "Spend %lldms in light sleep", sleep_time_ms );
-#endif
-}
-
-/**
- * Sets up (Enables) Power Management
- *
- * Sets a lower minimum CPU frequency (`CONFIG_NAVLICO_MIN_FREQ`) and enables support for automatic light sleep.
- *
- * Also see [Espressif: API Guides - Low Power Modes - DFS Configuration](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/low-power-mode/low-power-mode-soc.html#dfs-configuration).
- */
-void setup_power_management( void ) {
-	ESP_LOGI( LOG_TAG, "Enabling DFS between %u MHz and %u MHz", CONFIG_NAVLICO_PM_MIN_FREQ, CONFIG_NAVLICO_PM_MAX_FREQ );
-	const esp_pm_config_t pm_config = {
-		.max_freq_mhz = CONFIG_NAVLICO_PM_MAX_FREQ,
-		.min_freq_mhz = CONFIG_NAVLICO_PM_MIN_FREQ,
-		.light_sleep_enable = true
-	};
-	ESP_ERROR_CHECK( esp_pm_configure( &pm_config ) );
-
-#if CONFIG_LOG_DEFAULT_LEVEL_NONE && !LOG_MAXIMUM_LEVEL_DEBUG && !LOG_MAXIMUM_LEVEL_VERBOSE
-	esp_sleep_set_console_uart_handling_mode( ESP_SLEEP_ALWAYS_DISCARD_UART );
-#else
-	esp_sleep_set_console_uart_handling_mode( ESP_SLEEP_ALWAYS_FLUSH_UART );
+    struct timeval now;
+    gettimeofday( &now, nullptr );
+    long long const sleep_time_ms =
+    	(now.tv_sec - navlico_fsm_yield_enter_time.tv_sec) * 1000 +
+    	(now.tv_usec - navlico_fsm_yield_enter_time.tv_usec) / 1000;
+    ESP_LOGD( NAVLICO_FSM_TAG, "Spend %lldms in light sleep", sleep_time_ms );
 #endif
 }
 
@@ -105,9 +55,9 @@ void setup_power_management( void ) {
  * Without `gpio_sleep_sel_dis` and if `CONFIG_PM_SLP_DISABLE_GPIO` was set, the GPIOs would lose their input function
  * when the controller goes to light sleep.
  */
-void setup_input_pins( void ) {
+void static setup_navlico_fsm_input_pins( void ) {
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( LOG_TAG ) == ESP_LOG_VERBOSE )
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, GPIO_ALL_BUTTONS_MASK );
 #endif
 
@@ -117,7 +67,7 @@ void setup_input_pins( void ) {
 		.pull_up_en = GPIO_PULLUP_DISABLE,
 		.pull_down_en = GPIO_PULLDOWN_DISABLE,
 	};
-	ESP_LOGI( LOG_TAG, "Setting up input pins");
+	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up input pins");
 	ESP_ERROR_CHECK( gpio_config( &config ) );
 
 	// See https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-disable-gpio
@@ -132,7 +82,7 @@ void setup_input_pins( void ) {
 	gpio_sleep_sel_dis( GPIO_ANCHORING_BUTTON );
 
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( LOG_TAG ) == ESP_LOG_VERBOSE )
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, GPIO_ALL_BUTTONS_MASK );
 #endif
 }
@@ -145,9 +95,9 @@ void setup_input_pins( void ) {
  * controller goes to light sleep and the external MOSFET would slowly discharge each output pin as they are not
  * actively driven.
  */
-void setup_output_pins( void ) {
+void static setup_navlico_fsm_output_pins( void ) {
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( LOG_TAG ) == ESP_LOG_VERBOSE )
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, GPIO_ALL_INDICATORS_MASK | GPIO_ALL_LIGHTS_MASK );
 #endif
 
@@ -158,7 +108,7 @@ void setup_output_pins( void ) {
 		.pull_down_en = GPIO_PULLDOWN_DISABLE,
 		.intr_type = GPIO_INTR_DISABLE
 	};
-	ESP_LOGI( LOG_TAG, "Setting up output pins");
+	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up output pins");
 	ESP_ERROR_CHECK( gpio_config( &config ) );
 
 	// See https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-disable-gpio
@@ -175,7 +125,7 @@ void setup_output_pins( void ) {
 	gpio_sleep_sel_dis( GPIO_ALLROUND_WHITE_LIGHT );
 
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( LOG_TAG ) == ESP_LOG_VERBOSE )
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, GPIO_ALL_INDICATORS_MASK | GPIO_ALL_LIGHTS_MASK );
 #endif
 }
@@ -196,7 +146,7 @@ void setup_output_pins( void ) {
  * If `false`, the function reads the current level of the input pins.
  * @return The currently or most recently pressed button.
  */
-navlico_operational_state_t read_input_pins( bool const firstRun ) {
+navlico_fsm_state_t static read_navlico_fsm_input_pins( bool const firstRun ) {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -212,10 +162,10 @@ navlico_operational_state_t read_input_pins( bool const firstRun ) {
 
 	if ( firstRun ) {
 		uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
-		ESP_LOGI( LOG_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
+		ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
 
 		if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
-			ESP_LOGI( LOG_TAG, "Woke up from deep sleep" );
+			ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
 			uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
 			if ( GPIO_SAILING_BUTTON_MASK & wakeup_pin_mask )
 				return SAILING;
@@ -223,11 +173,11 @@ navlico_operational_state_t read_input_pins( bool const firstRun ) {
 				return DRIVING;
 			if ( GPIO_ANCHORING_BUTTON_MASK & wakeup_pin_mask )
 				return ANCHORING;
-			ESP_LOGE( LOG_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
-			return OFF;
+			ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
+			return UNDEFINED;
 		}
 
-		ESP_LOGI( LOG_TAG, "Came out of cold boot; simulating off button had been pressed" );
+		ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating off button had been pressed" );
 		return OFF;
 	}
 
@@ -235,7 +185,7 @@ navlico_operational_state_t read_input_pins( bool const firstRun ) {
 	uint_fast8_t sailingButtonLevel = 0;
 	uint_fast8_t drivingButtonLevel = 0;
 	uint_fast8_t anchoringButtonLevel = 0;
-	ESP_LOGI(LOG_TAG, "Woke up from light sleep or invoked from runtime context switch");
+	ESP_LOGI(NAVLICO_FSM_TAG, "Woke up from light sleep or invoked from runtime context switch");
 	// Repeated readings to debounce
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i) {
@@ -245,7 +195,7 @@ navlico_operational_state_t read_input_pins( bool const firstRun ) {
 		anchoringButtonLevel += gpio_get_level( GPIO_ANCHORING_BUTTON );
 		usleep( inbetweenDebounceDelay );
 	}
-	ESP_LOGD( LOG_TAG,
+	ESP_LOGD( NAVLICO_FSM_TAG,
 		  "Input pins have been read "
 		  "(offButtonLevel = %" PRIuFAST8 ", sailingButtonLevel = %" PRIuFAST8
 		  ", drivingButtonLevel = %" PRIuFAST8 ", anchoringButtonLevel = %" PRIuFAST8 ")",
@@ -258,19 +208,19 @@ navlico_operational_state_t read_input_pins( bool const firstRun ) {
 		return DRIVING;
 	if ( anchoringButtonLevel > debounceProbes / 2 )
 		return ANCHORING;
-	ESP_LOGE( LOG_TAG, "Unable to determine active input GPIO" );
-	return OFF;
+	ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
+	return UNDEFINED;
 }
 
 /**
  * Waits until all input pins have become idle
  */
-void wait_for_idle_input( void ) {
-	while ( gpio_get_level(GPIO_OFF_BUTTON) == 1 ||
-	        gpio_get_level(GPIO_SAILING_BUTTON) == 1 ||
-	        gpio_get_level(GPIO_DRIVING_BUTTON) == 1 ||
-	        gpio_get_level(GPIO_ANCHORING_BUTTON) == 1 ) {
-		vTaskDelay( 10 / portTICK_PERIOD_MS );
+void static wait_for_navlico_fsm_idle_input( void ) {
+	while ( gpio_get_level( GPIO_OFF_BUTTON ) == 1 ||
+	        gpio_get_level( GPIO_SAILING_BUTTON ) == 1 ||
+	        gpio_get_level( GPIO_DRIVING_BUTTON ) == 1 ||
+	        gpio_get_level( GPIO_ANCHORING_BUTTON ) == 1 ) {
+		vTaskDelay( pdMS_TO_TICKS( 10 ) );
 	}
 }
 
@@ -279,10 +229,12 @@ void wait_for_idle_input( void ) {
  *
  * This function uses the currently stored operational state in #operational_state to set the output pins.
  */
-void write_output_pins( void ) {
-	switch ( operational_state ) {
+void static write_navlico_fsm_output_pins( navlico_fsm_state_t const state ) {
+	switch ( state ) {
+		case UNDEFINED:
+			// TODO: We should do something else here and conspicuously indicate this error condition instead of just pretending to be in the "OFF" state.
 		case OFF:
-			ESP_LOGI( LOG_TAG, "New navigation light state: OFF" );
+			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: OFF" );
 			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
 			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
 			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
@@ -291,7 +243,7 @@ void write_output_pins( void ) {
 			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 0 );
 			break;
 		case SAILING:
-			ESP_LOGI( LOG_TAG, "New navigation light state: SAILING" );
+			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: SAILING" );
 			gpio_set_level( GPIO_SAILING_INDICATOR, 1 );
 			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
 			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
@@ -300,7 +252,7 @@ void write_output_pins( void ) {
 			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 0 );
 			break;
 		case DRIVING:
-			ESP_LOGI( LOG_TAG, "New navigation light state: DRIVING" );
+			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: DRIVING" );
 			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
 			gpio_set_level( GPIO_DRIVING_INDICATOR, 1 );
 			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
@@ -309,7 +261,7 @@ void write_output_pins( void ) {
 			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 0 );
 			break;
 		case ANCHORING:
-			ESP_LOGI( LOG_TAG, "New navigation light state: ANCHORING" );
+			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: ANCHORING" );
 			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
 			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
 			gpio_set_level( GPIO_ANCHORING_INDICATOR, 1 );
@@ -320,23 +272,13 @@ void write_output_pins( void ) {
 	}
 }
 
-/**
- * Attempts to go into deep sleep.
- *
- * This function is a wrapper around `esp_deep_sleep_try_to_start()`.
- * As a preliminary step, the function ensures that the GPIOs are set as a wake-up source, but nothing else.
- *
- * @return Result of the underlying `esp_deep_sleep_try_to_start()`.
- */
-esp_err_t sleep_deeply( void ) {
-	ESP_LOGD( LOG_TAG, "Enabling EXT1 wake-up on input pins for buttons" );
+esp_err_t static suspend_navlico_fsm( void ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up on input pins for buttons" );
 	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
 	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_HIGH ) );
-	ESP_LOGI( LOG_TAG, "Going to deep sleep ..." );
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-	gettimeofday( &deep_sleep_enter_time, nullptr );
-#endif
-	return esp_deep_sleep_try_to_start();
+	ESP_LOGI( NAVLICO_FSM_TAG, "Suspending ..." );
+	vTaskSuspend( nullptr );
+	return ESP_OK;
 }
 
 /**
@@ -347,24 +289,21 @@ esp_err_t sleep_deeply( void ) {
  *
  * @return Result of the underlying `esp_light_sleep_start()`.
  */
-esp_err_t sleep_lightly( void ) {
-	ESP_LOGD( LOG_TAG, "Enabling GPIO wake-up on input pins for buttons" );
+esp_err_t static sleep_navlico_fsm_lightly( void ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up on input pins for buttons" );
 	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_OFF_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_SAILING_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_DRIVING_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_ANCHORING_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
 	ESP_ERROR_CHECK( esp_sleep_enable_gpio_wakeup() );
-	ESP_LOGD( LOG_TAG, "Ensure the GPIO outputs remain powered in light sleep" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "Ensure the GPIO outputs remain powered in light sleep" );
 	// See Datasheet Sec. 2.2
 	// Digital pins (GPIO0 ~ GPIO5, GPIO22 ~ GPIO27):
 	// are unable to work in Deep-sleep mode, but can work in Light-sleep mode
 	// only if the power domain controlled by the XPD TOP does not power off.
 	ESP_ERROR_CHECK( esp_sleep_pd_config( ESP_PD_DOMAIN_TOP, ESP_PD_OPTION_ON ) );
-	ESP_LOGI( LOG_TAG, "Going to light sleep ..." );
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-	gettimeofday( &light_sleep_enter_time, nullptr );
-#endif
+	ESP_LOGI( NAVLICO_FSM_TAG, "Going to light sleep ..." );
 	return esp_light_sleep_start();
 }
 
@@ -377,44 +316,69 @@ esp_err_t sleep_lightly( void ) {
  *
  * @return Result of the underlying ::sleep_deeply() or ::sleep_lightly().
  */
-esp_err_t hibernate( void ) {
-	esp_err_t const sleep_error = operational_state == OFF ? sleep_deeply() : sleep_lightly();
+esp_err_t static yield_navlico_fsm( void ) {
+#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
+	gettimeofday( &navlico_fsm_yield_enter_time, nullptr );
+#endif
+	esp_err_t const sleep_error = navlico_fsm_state == OFF ? suspend_navlico_fsm() : sleep_navlico_fsm_lightly();
 	switch ( sleep_error ) {
 		case ESP_ERR_SLEEP_REJECT:
-			ESP_LOGE( LOG_TAG, "%s sleep rejected as wake-up source already set", operational_state == OFF ? "Deep" : "Light" );
+			ESP_LOGE( NAVLICO_FSM_TAG, "Light sleep rejected as wake-up source already set" );
 			return sleep_error;
 		case ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION:
-			ESP_LOGE( LOG_TAG, "%s sleep rejected as period would be too short", operational_state == OFF ? "Deep" : "Light" );
+			ESP_LOGE( NAVLICO_FSM_TAG, "Light sleep rejected as period would be too short" );
 			return sleep_error;
 		case ESP_OK:
-			log_light_sleep_duration();
+			log_navlico_fsm_yield_duration();
 			return ESP_OK;
 		default:
-			ESP_LOGE( LOG_TAG, "%s sleep failed with unknown reason", operational_state == OFF ? "Deep" : "Light" );
+			ESP_LOGE( NAVLICO_FSM_TAG, "Yield (light sleep or suspending) failed with unknown reason" );
 			return sleep_error;
 	}
 }
 
 /**
- * The main task of Navlico
+ * Returns the current operational state of the FSM:
+ *
+ * The returned operational state equals `UNDEFINED` if
+ * - the task has never read the inputs and set the state (initial state), or
+ * - the task is currently in the middle of updating the state, but has not yet reached a consistent state again (transitional state)
+ *
+ * @return The current operational state of the FSM.
  */
-void app_main(void) {
-	setup_power_management();
-	setup_input_pins();
-	setup_output_pins();
+navlico_fsm_state_t get_navlico_fsm_state( void ) {
+	return navlico_fsm_state;
+}
 
-	// After cold boot or deep sleep
-	log_deep_sleep_duration();
-	operational_state = read_input_pins( true );
-	write_output_pins();
-	wait_for_idle_input();
+/**
+ * Updates the state of the new FSM based on the input readings and sets the outputs accordingly.
+ *
+ * This functions sets the temporarily sets the state of the FMS to `UNDEFINED` while it reads the input pins and
+ * sets the output pins accordingly.
+ * This is a safety precaution in case another task calls get_navlico_fsm_state() asynchronously and concurrently
+ * while this function is in the middle of updating the output pins to indicate that the there is no consistent state yet.
+ *
+ * @param firstRun Passed on to read_input_pins(bool) and determines how read_input_pins(bool) determines the new state.
+ */
+void update_navlico_fsm_state( bool firstRun ) {
+	navlico_fsm_state = UNDEFINED;
+	navlico_fsm_state_t const new_state = read_navlico_fsm_input_pins( firstRun );
+	write_navlico_fsm_output_pins( new_state );
+	wait_for_navlico_fsm_idle_input();
+	navlico_fsm_state = new_state;
+}
 
-	// If `hibernate` goes into deep sleep, the loop is not executed, as `hibernate` does not return.
-	// Waking up from deep sleep will enter `app_main` from the start.
-	// Only if `hibernate` goes into light sleep, `hibernate` returns and the loop is executed.
-	while ( hibernate() == ESP_OK ) {
-		operational_state = read_input_pins( false );
-		write_output_pins();
-		wait_for_idle_input();
-	}
+void navlico_fsm_task( void* ) {
+    setup_navlico_fsm_input_pins();
+    setup_navlico_fsm_output_pins();
+
+    // First run action
+    update_navlico_fsm_state( true );
+
+    // If `yield` suspends ourselves, the loop is not executed, as `yield` does not return.
+    // Resuming from suspension will enter `navlico_fsm_task` from the start.
+    // Only if `yield` goes into light sleep, `yield` returns and the loop is executed.
+    while ( yield_navlico_fsm() == ESP_OK ) {
+        update_navlico_fsm_state( false );
+    }
 }

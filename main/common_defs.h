@@ -8,6 +8,6 @@
 /**
  * Identifier to tag log messages.
  */
-static char const * const LOG_TAG = "navlico";
+
 
 #endif //NAVLICO_COMMON_DEFS_H

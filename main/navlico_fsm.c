@@ -32,12 +32,12 @@ RTC_DATA_ATTR static navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
  */
 void log_navlico_fsm_yield_duration( void ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-    struct timeval now;
-    gettimeofday( &now, nullptr );
-    long long const sleep_time_ms =
-    	(now.tv_sec - navlico_fsm_yield_enter_time.tv_sec) * 1000 +
-    	(now.tv_usec - navlico_fsm_yield_enter_time.tv_usec) / 1000;
-    ESP_LOGD( NAVLICO_FSM_TAG, "Spend %lldms in light sleep", sleep_time_ms );
+	struct timeval now;
+	gettimeofday( &now, nullptr );
+	long long const sleep_time_ms =
+		(now.tv_sec - navlico_fsm_yield_enter_time.tv_sec) * 1000 +
+		(now.tv_usec - navlico_fsm_yield_enter_time.tv_usec) / 1000;
+	ESP_LOGD( NAVLICO_FSM_TAG, "Spend %lldms in light sleep", sleep_time_ms );
 #endif
 }
 
@@ -196,10 +196,10 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins( bool const firstRun ) {
 		usleep( inbetweenDebounceDelay );
 	}
 	ESP_LOGD( NAVLICO_FSM_TAG,
-		  "Input pins have been read "
-		  "(offButtonLevel = %" PRIuFAST8 ", sailingButtonLevel = %" PRIuFAST8
-		  ", drivingButtonLevel = %" PRIuFAST8 ", anchoringButtonLevel = %" PRIuFAST8 ")",
-		  offButtonLevel, sailingButtonLevel, drivingButtonLevel, anchoringButtonLevel );
+	          "Input pins have been read "
+	          "(offButtonLevel = %" PRIuFAST8 ", sailingButtonLevel = %" PRIuFAST8
+	          ", drivingButtonLevel = %" PRIuFAST8 ", anchoringButtonLevel = %" PRIuFAST8 ")",
+	          offButtonLevel, sailingButtonLevel, drivingButtonLevel, anchoringButtonLevel );
 	if ( offButtonLevel > debounceProbes / 2 )
 		return OFF;
 	if ( sailingButtonLevel > debounceProbes / 2 )
@@ -369,16 +369,16 @@ void update_navlico_fsm_state( bool firstRun ) {
 }
 
 void navlico_fsm_task( void* ) {
-    setup_navlico_fsm_input_pins();
-    setup_navlico_fsm_output_pins();
+	setup_navlico_fsm_input_pins();
+	setup_navlico_fsm_output_pins();
 
-    // First run action
-    update_navlico_fsm_state( true );
+	// First run action
+	update_navlico_fsm_state( true );
 
-    // If `yield` suspends ourselves, the loop is not executed, as `yield` does not return.
-    // Resuming from suspension will enter `navlico_fsm_task` from the start.
-    // Only if `yield` goes into light sleep, `yield` returns and the loop is executed.
-    while ( yield_navlico_fsm() == ESP_OK ) {
-        update_navlico_fsm_state( false );
-    }
+	// If `yield` suspends ourselves, the loop is not executed, as `yield` does not return.
+	// Resuming from suspension will enter `navlico_fsm_task` from the start.
+	// Only if `yield` goes into light sleep, `yield` returns and the loop is executed.
+	while ( yield_navlico_fsm() == ESP_OK ) {
+		update_navlico_fsm_state( false );
+	}
 }

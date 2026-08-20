@@ -1,6 +1,5 @@
-/** \file main.c
- * Implements the Finite State Machine (FSM) handle the operational state and the associated GPIOs.
- */
+/// \file main.c
+/// Implements the Finite State Machine (FSM) handle the operational state and the associated GPIOs.
 
 #include "navlico_fsm.h"
 #include "navlico_gpio_defs.h"
@@ -17,11 +16,11 @@ char const * const NAVLICO_FSM_TAG = "navlico_fsm";
 
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
 /// Timestamp when program entered light sleep for the last time
-RTC_DATA_ATTR static struct timeval yield_enter_time;
+RTC_DATA_ATTR static struct timeval navlico_fsm_yield_enter_time;
 #endif
 
 /// The active operational state
-RTC_DATA_ATTR static navlico_operational_state_t operational_state = UNDEFINED;
+RTC_DATA_ATTR static navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
 
 /**
  * Logs the duration since last light sleep.
@@ -31,11 +30,13 @@ RTC_DATA_ATTR static navlico_operational_state_t operational_state = UNDEFINED;
  *
  * TODO: Don't let this individual component decide about sleep mode. This should be moved to the idle task.
  */
-void log_yield_duration( void ) {
+void log_navlico_fsm_yield_duration( void ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
     struct timeval now;
     gettimeofday( &now, nullptr );
-    long long const sleep_time_ms = (now.tv_sec - yield_enter_time.tv_sec) * 1000 + (now.tv_usec - yield_enter_time.tv_usec) / 1000;
+    long long const sleep_time_ms =
+    	(now.tv_sec - navlico_fsm_yield_enter_time.tv_sec) * 1000 +
+    	(now.tv_usec - navlico_fsm_yield_enter_time.tv_usec) / 1000;
     ESP_LOGD( NAVLICO_FSM_TAG, "Spend %lldms in light sleep", sleep_time_ms );
 #endif
 }
@@ -54,7 +55,7 @@ void log_yield_duration( void ) {
  * Without `gpio_sleep_sel_dis` and if `CONFIG_PM_SLP_DISABLE_GPIO` was set, the GPIOs would lose their input function
  * when the controller goes to light sleep.
  */
-void static setup_input_pins( void ) {
+void static setup_navlico_fsm_input_pins( void ) {
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, GPIO_ALL_BUTTONS_MASK );
@@ -94,7 +95,7 @@ void static setup_input_pins( void ) {
  * controller goes to light sleep and the external MOSFET would slowly discharge each output pin as they are not
  * actively driven.
  */
-void static setup_output_pins( void ) {
+void static setup_navlico_fsm_output_pins( void ) {
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, GPIO_ALL_INDICATORS_MASK | GPIO_ALL_LIGHTS_MASK );
@@ -145,7 +146,7 @@ void static setup_output_pins( void ) {
  * If `false`, the function reads the current level of the input pins.
  * @return The currently or most recently pressed button.
  */
-navlico_operational_state_t static read_input_pins( bool const firstRun ) {
+navlico_fsm_state_t static read_navlico_fsm_input_pins( bool const firstRun ) {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -214,7 +215,7 @@ navlico_operational_state_t static read_input_pins( bool const firstRun ) {
 /**
  * Waits until all input pins have become idle
  */
-void static wait_for_idle_input( void ) {
+void static wait_for_navlico_fsm_idle_input( void ) {
 	while ( gpio_get_level( GPIO_OFF_BUTTON ) == 1 ||
 	        gpio_get_level( GPIO_SAILING_BUTTON ) == 1 ||
 	        gpio_get_level( GPIO_DRIVING_BUTTON ) == 1 ||
@@ -228,7 +229,7 @@ void static wait_for_idle_input( void ) {
  *
  * This function uses the currently stored operational state in #operational_state to set the output pins.
  */
-void static write_output_pins( navlico_operational_state_t const state ) {
+void static write_navlico_fsm_output_pins( navlico_fsm_state_t const state ) {
 	switch ( state ) {
 		case UNDEFINED:
 			// TODO: We should do something else here and conspicuously indicate this error condition instead of just pretending to be in the "OFF" state.
@@ -271,7 +272,7 @@ void static write_output_pins( navlico_operational_state_t const state ) {
 	}
 }
 
-esp_err_t static suspend( void ) {
+esp_err_t static suspend_navlico_fsm( void ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up on input pins for buttons" );
 	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
 	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_HIGH ) );
@@ -288,7 +289,7 @@ esp_err_t static suspend( void ) {
  *
  * @return Result of the underlying `esp_light_sleep_start()`.
  */
-esp_err_t static sleep_lightly( void ) {
+esp_err_t static sleep_navlico_fsm_lightly( void ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up on input pins for buttons" );
 	ESP_ERROR_CHECK( esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_ALL ) );
 	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_OFF_BUTTON , GPIO_INTR_HIGH_LEVEL ) );
@@ -315,11 +316,11 @@ esp_err_t static sleep_lightly( void ) {
  *
  * @return Result of the underlying ::sleep_deeply() or ::sleep_lightly().
  */
-esp_err_t static yield( void ) {
+esp_err_t static yield_navlico_fsm( void ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-	gettimeofday( &yield_enter_time, nullptr );
+	gettimeofday( &navlico_fsm_yield_enter_time, nullptr );
 #endif
-	esp_err_t const sleep_error = operational_state == OFF ? suspend() : sleep_lightly();
+	esp_err_t const sleep_error = navlico_fsm_state == OFF ? suspend_navlico_fsm() : sleep_navlico_fsm_lightly();
 	switch ( sleep_error ) {
 		case ESP_ERR_SLEEP_REJECT:
 			ESP_LOGE( NAVLICO_FSM_TAG, "Light sleep rejected as wake-up source already set" );
@@ -328,7 +329,7 @@ esp_err_t static yield( void ) {
 			ESP_LOGE( NAVLICO_FSM_TAG, "Light sleep rejected as period would be too short" );
 			return sleep_error;
 		case ESP_OK:
-			log_yield_duration();
+			log_navlico_fsm_yield_duration();
 			return ESP_OK;
 		default:
 			ESP_LOGE( NAVLICO_FSM_TAG, "Yield (light sleep or suspending) failed with unknown reason" );
@@ -345,8 +346,8 @@ esp_err_t static yield( void ) {
  *
  * @return The current operational state of the FSM.
  */
-navlico_operational_state_t get_navlico_fsm_state( void ) {
-	return operational_state;
+navlico_fsm_state_t get_navlico_fsm_state( void ) {
+	return navlico_fsm_state;
 }
 
 /**
@@ -360,16 +361,16 @@ navlico_operational_state_t get_navlico_fsm_state( void ) {
  * @param firstRun Passed on to read_input_pins(bool) and determines how read_input_pins(bool) determines the new state.
  */
 void update_navlico_fsm_state( bool firstRun ) {
-	operational_state = UNDEFINED;
-	navlico_operational_state_t const new_state = read_input_pins( firstRun );
-	write_output_pins( new_state );
-	wait_for_idle_input();
-	operational_state = new_state;
+	navlico_fsm_state = UNDEFINED;
+	navlico_fsm_state_t const new_state = read_navlico_fsm_input_pins( firstRun );
+	write_navlico_fsm_output_pins( new_state );
+	wait_for_navlico_fsm_idle_input();
+	navlico_fsm_state = new_state;
 }
 
 void navlico_fsm_task( void* ) {
-    setup_input_pins();
-    setup_output_pins();
+    setup_navlico_fsm_input_pins();
+    setup_navlico_fsm_output_pins();
 
     // First run action
     update_navlico_fsm_state( true );
@@ -377,7 +378,7 @@ void navlico_fsm_task( void* ) {
     // If `yield` suspends ourselves, the loop is not executed, as `yield` does not return.
     // Resuming from suspension will enter `navlico_fsm_task` from the start.
     // Only if `yield` goes into light sleep, `yield` returns and the loop is executed.
-    while ( yield() == ESP_OK ) {
+    while ( yield_navlico_fsm() == ESP_OK ) {
         update_navlico_fsm_state( false );
     }
 }

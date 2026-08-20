@@ -1,6 +1,5 @@
-/** \file main.c
- * The main file of Navlico.
- */
+/// \file main.c
+/// The main file of Navlico.
 
 #include "navlico_fsm.h"
 #include "sdkconfig.h"
@@ -28,7 +27,9 @@ void log_deep_sleep_duration( void ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
 	struct timeval now;
 	gettimeofday( &now, nullptr );
-	long long const sleep_time_ms = (now.tv_sec - deep_sleep_enter_time.tv_sec) * 1000 + (now.tv_usec - deep_sleep_enter_time.tv_usec) / 1000;
+	long long const sleep_time_ms =
+		(now.tv_sec - deep_sleep_enter_time.tv_sec) * 1000 +
+		(now.tv_usec - deep_sleep_enter_time.tv_usec) / 1000;
 	ESP_LOGD( NAVLICO_MAIN_TAG, "Spend %lldms in deep sleep", sleep_time_ms );
 #endif
 }

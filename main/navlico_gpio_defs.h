@@ -1,6 +1,5 @@
 /// \file navlico_gpio_defs.h
 /// Defines GPIO pin assignments for Navlico's Finite-State Machine (FSM).
-///
 
 #ifndef NAVLICO_GPIO_DEFS_H
 #define NAVLICO_GPIO_DEFS_H

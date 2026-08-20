@@ -110,3 +110,8 @@ CONFIG_BOOTLOADER_SKIP_VALIDATE_IN_DEEP_SLEEP=y
 #
 # Taken from Espressif example "deep_sleep".
 CONFIG_LIBC_TIME_SYSCALL_USE_RTC_HRT=y
+
+# We need to resume tasks from an ISR.
+# ISR can only call code (and data) which is placed in RAM.
+# Hence the code for `vTaskResume` must be placed in IRAM.
+CONFIG_FREERTOS_IN_IRAM=y

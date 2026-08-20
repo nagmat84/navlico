@@ -22,6 +22,12 @@ RTC_DATA_ATTR static struct timeval navlico_fsm_yield_enter_time;
 /// The active operational state
 RTC_DATA_ATTR static navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
 
+/// The handle for the Navlico FSM Task
+static TaskHandle_t navlico_fsm_task_handle;
+
+/// The handle for the GPIO ISR
+static gpio_isr_handle_t navlico_fsm_isr_handle;
+
 /**
  * Logs the duration since last light sleep.
  *
@@ -130,14 +136,63 @@ void static setup_navlico_fsm_output_pins( void ) {
 #endif
 }
 
-/*void handle_gpio_interrupt( void* ) {
-	vTaskResume( main_task_handle );
+/**
+ * The interrupt-service routine which resume this task upon a GPIO interrupt.
+ *
+ * @internal An ISR can only code (and data) which resides in RAM as flash access (and SPI) is potentially disabled.
+ * See:
+ * - https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/system/intr_alloc.html#iram-safe-interrupt-handlers
+ * - https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/memory-types.html#when-to-place-code-in-iram
+ * Hence, `vTaskResume` must be placed in IRAM, too.
+ * This means `CONFIG_FREERTOS_IN_IRAM=y` must be set.
+ */
+void static IRAM_ATTR handle_navlico_fsm_gpio_interrupt( void* ) {
+	xTaskResumeFromISR( navlico_fsm_task_handle );
 }
 
-void setup_isr( void ) {
-	main_task_handle = xTaskGetCurrentTaskHandle();
-	gpio_isr_register( handle_gpio_interrupt, nullptr, ESP_INTR_FLAG_HIGH | ESP_INTR_FLAG_SHARED, nullptr );
-}*/
+/**
+ * Registers the interrupt-service routine (ISR) for GPIO
+ *
+ * @internal This function registers the ISR with `ESP_INTR_FLAG_IRAM` to mark it as IRAM-safe, see
+ * [Espressif: ESP-IDF Programming Guide - System API - Interrupt Allocation](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/system/intr_alloc.html#iram-safe-interrupt-handlers).
+ * This means that handle_navlico_fsm_gpio_interrupt(void*) and all function it calls must be placed in IRAM.
+ */
+void static setup_navlico_fsm_isr( void ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "Registering interrupt-service routine ..." );
+#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
+	esp_intr_dump( stdout );
+#endif
+	navlico_fsm_task_handle = xTaskGetCurrentTaskHandle();
+	gpio_isr_register(
+		handle_navlico_fsm_gpio_interrupt,
+		nullptr,
+		ESP_INTR_FLAG_HIGH | ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM,
+		&navlico_fsm_isr_handle
+	);
+	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine registered" );
+#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
+		esp_intr_dump( stdout );
+#endif
+}
+
+/**
+ * Disables the interrupt-service routine (ISR) which has previously set up with setup_navlico_fsm_isr(void).
+ */
+void static uninstall_navlico_fsm_isr( void ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "Disabling interrupt-service routine ..." );
+#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
+		esp_intr_dump( stdout );
+#endif
+	esp_intr_disable( navlico_fsm_isr_handle );
+	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine disabled" );
+#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
+	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
+		esp_intr_dump( stdout );
+#endif
+}
 
 /**
  * Reads the input pins and returns the currently or most recently pressed button.
@@ -381,7 +436,7 @@ void update_navlico_fsm_state( bool firstRun ) {
 void navlico_fsm_task( void* ) {
 	setup_navlico_fsm_input_pins();
 	setup_navlico_fsm_output_pins();
-	//setup_isr();
+	setup_navlico_fsm_isr();
 
 	// First run action
 	update_navlico_fsm_state( true );
@@ -392,4 +447,6 @@ void navlico_fsm_task( void* ) {
 	while ( yield_navlico_fsm() == ESP_OK ) {
 		update_navlico_fsm_state( false );
 	}
+
+	uninstall_navlico_fsm_isr();
 }

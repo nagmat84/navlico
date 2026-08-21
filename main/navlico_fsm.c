@@ -69,6 +69,8 @@ void static setup_navlico_fsm_input_pins( void ) {
 		.mode = GPIO_MODE_INPUT,
 		.pull_up_en = GPIO_PULLUP_DISABLE,
 		.pull_down_en = GPIO_PULLDOWN_DISABLE,
+		.intr_type = GPIO_INTR_DISABLE,  // only enable interrupts _after_ the ISR has been set up, keep interrupts off for now
+		.hys_ctrl_mode = GPIO_HYS_SOFT_ENABLE
 	};
 	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up input pins");
 	ESP_ERROR_CHECK( gpio_config( &config ) );
@@ -120,12 +122,12 @@ void static setup_navlico_fsm_output_pins( void ) {
 	//
 	// you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
 	// You can also keep this feature on and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
-	gpio_sleep_sel_dis( GPIO_SAILING_INDICATOR );
-	gpio_sleep_sel_dis( GPIO_DRIVING_INDICATOR );
-	gpio_sleep_sel_dis( GPIO_ANCHORING_INDICATOR );
-	gpio_sleep_sel_dis( GPIO_SIDE_N_STERN_LIGHT );
-	gpio_sleep_sel_dis( GPIO_MASTHEAD_LIGHT );
-	gpio_sleep_sel_dis( GPIO_ALLROUND_WHITE_LIGHT );
+	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SAILING_INDICATOR ) );
+	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_DRIVING_INDICATOR ) );
+	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ANCHORING_INDICATOR ) );
+	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SIDE_N_STERN_LIGHT ) );
+	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_MASTHEAD_LIGHT ) );
+	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ALLROUND_WHITE_LIGHT ) );
 
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
@@ -134,16 +136,57 @@ void static setup_navlico_fsm_output_pins( void ) {
 }
 
 /**
- * The interrupt-service routine which resume this task upon a GPIO interrupt.
+ * Enables interrupts from the GPIO peripheral
+ *
+ * This function enables interrupts at their source, i.e. at the GPIO peripheral.
+ * The function assumes that the interrupt is already (or still) allocated and the ISR installed.
+ */
+void static enable_navlico_fsm_gpio_interrupts( void ) {
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_OFF_BUTTON, GPIO_INTR_POSEDGE ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_BUTTON, GPIO_INTR_POSEDGE ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DRIVING_BUTTON, GPIO_INTR_POSEDGE ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_ANCHORING_BUTTON, GPIO_INTR_POSEDGE ) );
+	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_OFF_BUTTON ) );
+	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_SAILING_BUTTON ) );
+	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_DRIVING_BUTTON ) );
+	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_ANCHORING_BUTTON ) );
+}
+
+/**
+ * Disables interrupts from the GPIO peripheral
+ *
+ * This function disables interrupts at their source, i.e. at the GPIO peripheral.
+ * The function keeps the interrupt allocation and the ISR untouched.
+ *
+ * @internal This function must be placed in RAM as the ISR handle_navlico_fsm_gpio_interrupt(void) calls this function
+ * to temporarily disable subsequent interrupts while the first is still handled.
+ * An ISR can only call code from RAM.
+ */
+void static IRAM_ATTR disable_navlico_fsm_gpio_interrupts( void ) {
+	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_OFF_BUTTON ) );
+	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_SAILING_BUTTON ) );
+	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_DRIVING_BUTTON ) );
+	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_ANCHORING_BUTTON ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_OFF_BUTTON, GPIO_INTR_DISABLE ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_BUTTON, GPIO_INTR_DISABLE ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DRIVING_BUTTON, GPIO_INTR_DISABLE ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_ANCHORING_BUTTON, GPIO_INTR_DISABLE ) );
+}
+
+/**
+ * The interrupt-service routine which notifies this task upon a GPIO interrupt.
+ *
+ *
  *
  * @internal An ISR can only code (and data) which resides in RAM as flash access (and SPI) is potentially disabled.
  * See:
  * - https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/system/intr_alloc.html#iram-safe-interrupt-handlers
  * - https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/memory-types.html#when-to-place-code-in-iram
- * Hence, `vTaskResume` must be placed in IRAM, too.
+ * Hence, `vTaskNotifyGiveFromISR` and `vPortYieldFromISR` must be placed in IRAM, too.
  * This means `CONFIG_FREERTOS_IN_IRAM=y` must be set.
  */
 void static IRAM_ATTR handle_navlico_fsm_gpio_interrupt( void* ) {
+	disable_navlico_fsm_gpio_interrupts();
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 	vTaskNotifyGiveFromISR( navlico_fsm_task_handle, &xHigherPriorityTaskWoken );
 	if ( xHigherPriorityTaskWoken == pdTRUE ) {
@@ -165,7 +208,7 @@ void static setup_navlico_fsm_isr( void ) {
 	esp_intr_dump( stdout );
 #endif
 	navlico_fsm_task_handle = xTaskGetCurrentTaskHandle();
-	ESP_ERROR_CHECK( gpio_install_isr_service( ESP_INTR_FLAG_HIGH | ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM ) );
+	ESP_ERROR_CHECK( gpio_install_isr_service( ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM ) );
 	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_OFF_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
 	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_SAILING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
 	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_DRIVING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
@@ -407,6 +450,10 @@ void navlico_fsm_task( void* ) {
 
 	// ReSharper disable once CppDFAEndlessLoop
 	while ( true ) {
+		// We have to (re-)enable the interrupts each time as the ISR disables the interrupts
+		// before it notifies the task to avoid interim interrupts piling up
+		// while the first interrupt is still being handled.
+		enable_navlico_fsm_gpio_interrupts();
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		update_navlico_fsm_state( false );
 	}

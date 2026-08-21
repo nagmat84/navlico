@@ -14,35 +14,11 @@
 
 char const * const NAVLICO_FSM_TAG = "navlico_fsm";
 
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-/// Timestamp when program entered light sleep for the last time
-RTC_DATA_ATTR static struct timeval navlico_fsm_yield_enter_time;
-#endif
-
 /// The active operational state
 RTC_DATA_ATTR static navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
 
 /// The handle for the Navlico FSM Task
 static TaskHandle_t navlico_fsm_task_handle;
-
-/**
- * Logs the duration since last light sleep.
- *
- * The function only logs a message if the log level is DEBUG or higher.
- * This functions is a no-op if build configuration disables debug logs.
- *
- * TODO: Don't let this individual component decide about sleep mode. This should be moved to the idle task.
- */
-void log_navlico_fsm_yield_duration( void ) {
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
-	struct timeval now;
-	gettimeofday( &now, nullptr );
-	long long const sleep_time_ms =
-		(now.tv_sec - navlico_fsm_yield_enter_time.tv_sec) * 1000 +
-		(now.tv_usec - navlico_fsm_yield_enter_time.tv_usec) / 1000;
-	ESP_LOGD( NAVLICO_FSM_TAG, "Spend %lldms in light sleep", sleep_time_ms );
-#endif
-}
 
 /**
  * Configures the Input Pins

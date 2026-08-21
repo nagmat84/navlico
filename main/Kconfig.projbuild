@@ -67,6 +67,11 @@ menu "Navlico Configuration"
         default 64 if NAVLICO_PM_MIN_FREQ_MHZ_64
         default 96 if NAVLICO_PM_MIN_FREQ_MHZ_96
 
+    config NAVLICO_DEEP_SLEEP_THRESHOLD_MS
+        int
+        prompt "Threshold for the expected sleep duration which will trigger a deep sleep instead of a light sleep"
+        default 5000
+
 endmenu
 
 config NAVLICO_HAS_SLEEP_TIMES

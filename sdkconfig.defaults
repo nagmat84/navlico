@@ -115,3 +115,7 @@ CONFIG_LIBC_TIME_SYSCALL_USE_RTC_HRT=y
 # ISR can only call code (and data) which is placed in RAM.
 # Hence the code for `vTaskResume` must be placed in IRAM.
 CONFIG_FREERTOS_IN_IRAM=y
+
+# We need ESP PM to invoke our callback, when it attempts to go into light sleep.
+# When ESP PM attempts to go into (light) sleep, we check whether we can go into deep sleep instead
+CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y

@@ -1,5 +1,5 @@
 /// \file navlico_fsm.h
-/// General definitions for Navlico's Finite-State Machine.
+/// General declarations for Navlico's Finite-State Machine.
 ///
 /// In order to keep this file succinct and clear the extensive GPIO assignments are in the seperate header file navlico_gpio_defs.h.
 

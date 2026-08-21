@@ -24,13 +24,13 @@ RTC_RODATA_ATTR static char * const NAVLICO_PM_DEEP_STR = "deep";
 /// Timestamp when program entered deep sleep for the last time
 RTC_DATA_ATTR static struct timeval navlico_pm_deep_sleep_enter_time;
 
-IRAM_ATTR static esp_err_t log_navlico_pm_enter_sleep( int64_t const sleep_time_us, void *arg ) {
-	ESP_EARLY_LOGD( NAVLICO_PM_TAG, "Going to %s sleep for approximately %" PRId64 " ms ...", arg, sleep_time_us );
+IRAM_ATTR static esp_err_t log_navlico_pm_enter_sleep( int64_t const sleep_time_us, void* ) {
+	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Going to sleep for approximately %" PRId64 " ms ...", sleep_time_us );
 	return ESP_OK;
 }
 
 IRAM_ATTR static esp_err_t log_navlico_pm_exit_sleep( int64_t const sleep_time_us, void *arg ) {
-	ESP_EARLY_LOGD( NAVLICO_PM_TAG, "Spent %" PRId64 " ms in %s sleep", sleep_time_us, arg );
+	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Spent %" PRId64 " ms in %s sleep", sleep_time_us, arg );
 	return ESP_OK;
 }
 
@@ -58,11 +58,11 @@ IRAM_ATTR esp_err_t navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void
 	gettimeofday( &navlico_pm_deep_sleep_enter_time, nullptr );
 #endif
 	if ( sleep_time_us < CONFIG_NAVLICO_DEEP_SLEEP_THRESHOLD_MS * 1000 ) {
-		ESP_EARLY_LOGD( NAVLICO_PM_TAG, "Expected sleep time of %" PRId64 " ms too short for deep sleep", sleep_time_us / 1000 );
+		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Expected sleep time of %" PRId64 " ms too short for deep sleep", sleep_time_us / 1000 );
 		return ESP_OK;
 	}
 	if ( get_navlico_fsm_state() != OFF ) {
-		ESP_EARLY_LOGD( NAVLICO_PM_TAG, "Navlico FSM is not int OFF state; deep sleep not possible" );
+		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Navlico FSM is not int OFF state; deep sleep not possible" );
 		return ESP_OK;
 	}
 	// `esp_pm_configure(const void*)` enables the timer as a wake-up source with 0µs.
@@ -71,6 +71,7 @@ IRAM_ATTR esp_err_t navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void
 	// This means at this point the timer is enabled as a wake-up source with the wake-up time in the past.
 	// We must explicitly disable the timer as otherwise deep sleep will fail.
 	esp_sleep_disable_wakeup_source( ESP_SLEEP_WAKEUP_TIMER );
+	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Navlico FSM is entering deep sleep ..." );
 	esp_err_t const res = esp_deep_sleep_try_to_start();
 	if ( res == ESP_ERR_SLEEP_REJECT ) {
 		ESP_EARLY_LOGE( NAVLICO_PM_TAG, "Deep sleep rejected as wake-up source already triggered" );
@@ -106,7 +107,7 @@ void setup_power_management( void ) {
 	ESP_ERROR_CHECK( esp_pm_light_sleep_register_cbs( &pm_cb_log_config ) );
 #endif
 	esp_pm_sleep_cbs_register_config_t pm_cb_deep_sleep_config = {
-		.enter_cb = log_navlico_pm_enter_sleep,
+		.enter_cb = navlico_pm_try_deep_sleep,
 		.exit_cb = nullptr,
 		.enter_cb_user_arg = nullptr,
 		.exit_cb_user_arg = nullptr,

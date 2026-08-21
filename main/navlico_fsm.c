@@ -9,7 +9,6 @@
 #include <esp_sleep.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <sys/time.h>
 #include <unistd.h>
 
 char const * const NAVLICO_FSM_TAG = "navlico_fsm";
@@ -116,6 +115,18 @@ void static setup_navlico_fsm_output_pins( void ) {
  *
  * This function enables interrupts at their source, i.e. at the GPIO peripheral.
  * The function assumes that the interrupt is already (or still) allocated and the ISR installed.
+ *
+ * @internal The interrupt must trigger upon a high input level, a rising edge is not sufficient.
+ * During (light) sleep a rising edge is not detected and the ISR will never be called.
+ * `gpio_wakeup_enable only` only accepts the two level types for a reason:
+ * Light-sleep GPIO wake on the normal digital pins is level-only by design.
+ * The digital edge-detect logic isn't clocked while the core is down,
+ * so there's no edge detector alive to catch the transition in the first place.
+ * Only a level comparator is watching, which is why `HIGH_LEVEL` works and `POSEDGE` just never fires.
+ * Only the pins which sit in the LP/RTC IO domain stay powered through light sleep and keeps a real edge detector.
+ * The detector latches the rising edge and holds it until the CPU is back up.
+ * So the LP/RTC pins are the only place you get true edge semantics across sleep.
+ * See https://www.reddit.com/r/esp32/comments/1vtfldn/comment/p51c27o/
  */
 void static enable_navlico_fsm_gpio_interrupts( void ) {
 	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_OFF_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
@@ -197,23 +208,6 @@ void static setup_navlico_fsm_isr( void ) {
 }
 
 /**
- * Disables the interrupt-service routine (ISR) which has previously set up with setup_navlico_fsm_isr(void).
- */
-/*void static uninstall_navlico_fsm_isr( void ) {
-	ESP_LOGD( NAVLICO_FSM_TAG, "Disabling interrupt-service routine ..." );
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		esp_intr_dump( stdout );
-#endif
-	ESP_ERROR_CHECK( gpio_uninstall_isr_service() );
-	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine disabled" );
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		esp_intr_dump( stdout );
-#endif
-}*/
-
-/**
  * Reads the input pins and returns the currently or most recently pressed button.
  *
  * This function is called whenever the inputs should be handled:
@@ -239,7 +233,7 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins_after_start() {
 		return UNDEFINED;
 	}
 
-	ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating off button had been pressed" );
+	ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating OFF button had been pressed" );
 	return OFF;
 }
 
@@ -247,9 +241,9 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins_after_start() {
  * Reads the input pins and returns the currently or most recently pressed button.
  *
  * This function is called whenever the inputs should be handled:
- *  - after waking-up from light sleep
+ *  - after waking up from light sleep
  *  - during normal runtime
- *  - after the interrupt-service routine (ISR) released the main task from suspension
+ *  - after the interrupt-service routine (ISR) notified this task
  *
  * @return The currently or most recently pressed button.
  */
@@ -271,10 +265,10 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins() {
 	uint_fast8_t sailingButtonLevel = 0;
 	uint_fast8_t drivingButtonLevel = 0;
 	uint_fast8_t anchoringButtonLevel = 0;
-	ESP_LOGI(NAVLICO_FSM_TAG, "Reading input pins");
+	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
 	// Repeated readings to debounce
 	usleep( initialDebounceDelay );
-	for ( uint_fast8_t i = 0; i < debounceProbes; ++i) {
+	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
 		offButtonLevel += gpio_get_level( GPIO_OFF_BUTTON );
 		sailingButtonLevel += gpio_get_level( GPIO_SAILING_BUTTON );
 		drivingButtonLevel += gpio_get_level( GPIO_DRIVING_BUTTON );
@@ -415,6 +409,12 @@ void update_navlico_fsm_state( bool firstRun ) {
 	navlico_fsm_state = new_state;
 }
 
+/**
+ * Entry point of the Navlico FSM Task.
+ *
+ * Contains the main loop of the Navlico FSM Task.
+ * This function never returns and is supposed to be called via `xTaskCreate`.
+ */
 void navlico_fsm_task( void* ) {
 	setup_navlico_fsm_input_pins();
 	setup_navlico_fsm_output_pins();
@@ -433,6 +433,4 @@ void navlico_fsm_task( void* ) {
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		update_navlico_fsm_state( false );
 	}
-
-	//uninstall_navlico_fsm_isr();
 }

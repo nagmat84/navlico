@@ -40,7 +40,6 @@ void log_navlico_pm_time_since_deep_sleep( void ) {
 	int64_t const deep_sleep_time_us =
 		(now.tv_sec - navlico_pm_deep_sleep_enter_time.tv_sec) * 1000 * 1000 +
 		(now.tv_usec - navlico_pm_deep_sleep_enter_time.tv_usec);
-
 	log_navlico_pm_exit_sleep( deep_sleep_time_us, NAVLICO_PM_DEEP_STR );
 }
 #endif
@@ -62,7 +61,7 @@ IRAM_ATTR esp_err_t navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void
 		return ESP_OK;
 	}
 	if ( get_navlico_fsm_state() != OFF ) {
-		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Navlico FSM is not int OFF state; deep sleep not possible" );
+		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Navlico FSM is not in OFF state; deep sleep not possible" );
 		return ESP_OK;
 	}
 	// `esp_pm_configure(const void*)` enables the timer as a wake-up source with 0µs.

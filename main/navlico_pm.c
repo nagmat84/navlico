@@ -15,21 +15,21 @@
 #include <esp_sleep.h>
 #include <sys/time.h>
 
-static char const * const NAVLICO_PM_TAG = "navlico_pm";
+static constexpr DRAM_ATTR char NAVLICO_PM_TAG[] = "navlico_pm";
 
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
 
-RTC_RODATA_ATTR static char * const NAVLICO_PM_LIGHT_STR = "light";
-RTC_RODATA_ATTR static char * const NAVLICO_PM_DEEP_STR = "deep";
+static constexpr DRAM_ATTR char NAVLICO_PM_LIGHT_STR[] = "light";
+static constexpr DRAM_ATTR char NAVLICO_PM_DEEP_STR[] = "deep";
 /// Timestamp when program entered deep sleep for the last time
-RTC_DATA_ATTR static struct timeval navlico_pm_deep_sleep_enter_time;
+static RTC_DATA_ATTR struct timeval navlico_pm_deep_sleep_enter_time;
 
-IRAM_ATTR static esp_err_t log_navlico_pm_enter_sleep( int64_t const sleep_time_us, void* ) {
+static esp_err_t IRAM_ATTR log_navlico_pm_enter_sleep( int64_t const sleep_time_us, void* ) {
 	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Going to sleep for approximately %" PRId64 " ms ...", sleep_time_us );
 	return ESP_OK;
 }
 
-IRAM_ATTR static esp_err_t log_navlico_pm_exit_sleep( int64_t const sleep_time_us, void *arg ) {
+static esp_err_t IRAM_ATTR log_navlico_pm_exit_sleep( int64_t const sleep_time_us, void *arg ) {
 	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Spent %" PRId64 " ms in %s sleep", sleep_time_us, arg );
 	return ESP_OK;
 }
@@ -40,7 +40,7 @@ void log_navlico_pm_time_since_deep_sleep( void ) {
 	int64_t const deep_sleep_time_us =
 		(now.tv_sec - navlico_pm_deep_sleep_enter_time.tv_sec) * 1000 * 1000 +
 		(now.tv_usec - navlico_pm_deep_sleep_enter_time.tv_usec);
-	log_navlico_pm_exit_sleep( deep_sleep_time_us, NAVLICO_PM_DEEP_STR );
+	log_navlico_pm_exit_sleep( deep_sleep_time_us, (void*)NAVLICO_PM_DEEP_STR );
 }
 #endif
 
@@ -52,7 +52,7 @@ void log_navlico_pm_time_since_deep_sleep( void ) {
  *
  * @return Result of the underlying `esp_deep_sleep_try_to_start()`.
  */
-IRAM_ATTR esp_err_t navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void *arg ) {
+esp_err_t IRAM_ATTR navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void *arg ) {
 #if CONFIG_NAVLICO_HAS_SLEEP_TIMES
 	gettimeofday( &navlico_pm_deep_sleep_enter_time, nullptr );
 #endif
@@ -99,7 +99,7 @@ void setup_power_management( void ) {
 		.enter_cb = log_navlico_pm_enter_sleep,
 		.exit_cb = log_navlico_pm_exit_sleep,
 		.enter_cb_user_arg = nullptr,
-		.exit_cb_user_arg = NAVLICO_PM_LIGHT_STR,
+		.exit_cb_user_arg = (void*)NAVLICO_PM_LIGHT_STR,
 		.enter_cb_prior = 0,
 		.exit_cb_prior = 0
 	};

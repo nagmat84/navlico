@@ -6,7 +6,7 @@
 #ifndef NAVLICO_NAVLICO_FSM_H
 #define NAVLICO_NAVLICO_FSM_H
 
-extern char const * const NAVLICO_FSM_TAG;
+extern const char NAVLICO_FSM_TAG[];
 
 /**
  * Enum to define the operational state

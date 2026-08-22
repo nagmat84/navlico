@@ -11,10 +11,10 @@
 #include <freertos/task.h>
 #include <unistd.h>
 
-char const * const NAVLICO_FSM_TAG = "navlico_fsm";
+const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 
 /// The active operational state
-RTC_DATA_ATTR static navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
+static RTC_DATA_ATTR navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
 
 /// The handle for the Navlico FSM Task
 static TaskHandle_t navlico_fsm_task_handle;

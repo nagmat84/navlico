@@ -2,22 +2,39 @@
 /// Implements the setup routines for the GPIOs of Navlico's Finite State Machine (FSM).
 
 #include "navlico_fsm.h"
-#include "navlico_gpio_defs.h"
 #include "sdkconfig.h"
 #include <esp_log.h>
 #include <esp_sleep.h>
 
 #if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
 void static dump_navlico_fsm_io_configuration( void ) {
+	static uint64_t mask = 0ULL;
+	if ( mask == 0ULL ) {
+		for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
+			mask |= GPIO_MASK( navlico_fsm_buttons[btn].gpio_num );
+		for ( navlico_fsm_indicator_t ind = 0; ind < IND_COUNT; ++ind )
+			mask |= GPIO_MASK( navlico_fsm_indicators[ind].gpio_num );
+		for ( navlico_fsm_light_t light = 0; light < LIGHT_COUNT; ++light )
+			mask |= GPIO_MASK( navlico_fsm_lights[light].gpio_num );
+	}
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		gpio_dump_io_configuration(
-			stdout,
-			GPIO_INPUT_ONLY_MASK | GPIO_COMBINED_IO_OPEN_DRAIN_MASK | GPIO_OUTPUT_ONLY_PUSH_PULL_MASK | GPIO_OUTPUT_ONLY_OPEN_DRAIN_MASK
-		);
+		gpio_dump_io_configuration( stdout, mask );
 }
 #else
 void static dump_navlico_fsm_io_configuration( void ) {}
 #endif
+
+/**
+ * Configures a single GPIO
+ *
+ * @param gpio_def The GPIO definition (contains GPIO number and configuration)
+ */
+void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_definition_t const * const gpio_def ) {
+	ESP_ERROR_CHECK( gpio_set_direction( gpio_def->gpio_num, gpio_def->gpio_mode ) );
+	ESP_ERROR_CHECK( gpio_set_pull_mode( gpio_def->gpio_num, GPIO_FLOATING ) );
+	ESP_ERROR_CHECK( gpio_intr_disable( gpio_def->gpio_num ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( gpio_def->gpio_num, GPIO_INTR_DISABLE ) );
+}
 
 /**
  * Configures the GPIO Functions
@@ -30,33 +47,12 @@ void static dump_navlico_fsm_io_configuration( void ) {}
  */
 void static setup_navlico_fsm_gpio_functions( void ) {
 	dump_navlico_fsm_io_configuration();
-	gpio_config_t config = {
-		.pull_up_en = GPIO_PULLUP_DISABLE,
-		.pull_down_en = GPIO_PULLDOWN_DISABLE,
-		.intr_type = GPIO_INTR_DISABLE,  // only enable interrupts _after_ the ISR has been set up, keep interrupts off for now
-		.hys_ctrl_mode = GPIO_HYS_SOFT_ENABLE
-	};
-
-	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up input-only GPIOs");
-	config.pin_bit_mask = GPIO_INPUT_ONLY_MASK;
-	config.mode = GPIO_MODE_INPUT;
-	ESP_ERROR_CHECK( gpio_config( &config ) );
-
-	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up combined input/output pins in open-drain mode");
-	config.pin_bit_mask = GPIO_COMBINED_IO_OPEN_DRAIN_MASK;
-	config.mode = GPIO_MODE_INPUT_OUTPUT_OD;
-	ESP_ERROR_CHECK( gpio_config( &config ) );
-
-	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up output-only pins in push-pull mode");
-	config.pin_bit_mask = GPIO_OUTPUT_ONLY_PUSH_PULL_MASK;
-	config.mode = GPIO_MODE_OUTPUT;
-	ESP_ERROR_CHECK( gpio_config( &config ) );
-
-	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up output-only pins in open-drain mode");
-	config.pin_bit_mask = GPIO_OUTPUT_ONLY_OPEN_DRAIN_MASK;
-	config.mode = GPIO_MODE_OUTPUT_OD;
-	ESP_ERROR_CHECK( gpio_config( &config ) );
-
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
+		setup_navlico_fsm_gpio_function( &navlico_fsm_buttons[btn] );
+	for ( navlico_fsm_indicator_t ind = 0; ind < IND_COUNT; ++ind )
+		setup_navlico_fsm_gpio_function( &navlico_fsm_indicators[ind] );
+	for ( navlico_fsm_light_t light = 0; light < LIGHT_COUNT; ++light )
+		setup_navlico_fsm_gpio_function( &navlico_fsm_lights[light] );
 	dump_navlico_fsm_io_configuration();
 }
 
@@ -77,25 +73,12 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
 	// you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
 	// You can also keep this feature on and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
 	ESP_LOGD( NAVLICO_FSM_TAG, "Ensure the GPIOs keep configuration in light sleep" );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_OFF_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SAILING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_DRIVING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ANCHORING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SAILING_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_DRIVING_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ANCHORING_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SIDE_N_STERN_LIGHT ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_MASTHEAD_LIGHT ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ALLROUND_WHITE_LIGHT ) );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SAILING_COAST_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_DISABLED_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SAILING_COAST_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_DISABLED_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ALLROUND_GREEN_LIGHT ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ALLROUND_RED_1_LIGHT ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ALLROUND_RED_2_LIGHT ) );
-#endif
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
+		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_buttons[btn].gpio_num ) );
+	for ( navlico_fsm_indicator_t ind = 0; ind < IND_COUNT; ++ind )
+		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_indicators[ind].gpio_num ) );
+	for ( navlico_fsm_light_t light = 0; light < LIGHT_COUNT; ++light )
+		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_lights[light].gpio_num ) );
 
 	// See Datasheet Sec. 2.2
 	// Digital pins (GPIO0 ~ GPIO5, GPIO22 ~ GPIO27):
@@ -109,15 +92,23 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
  * Configures necessary wake-up sources.
  */
 void static setup_navlico_fsm_gpio_wakeup( void ) {
+	static uint64_t GPIO_DEEP_SLEEP_WAKEUP_BUTTONS_MASK;
+	GPIO_DEEP_SLEEP_WAKEUP_BUTTONS_MASK =
+		GPIO_MASK( navlico_fsm_buttons[ SAILING_BTN ].gpio_num ) |
+		GPIO_MASK( navlico_fsm_buttons[ DRIVING_BTN ].gpio_num ) |
+		GPIO_MASK( navlico_fsm_buttons[ ANCHORING_BTN ].gpio_num ) |
+	#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+		GPIO_MASK( navlico_fsm_buttons[ SAILING_COAST_BTN ].gpio_num ) |
+		GPIO_MASK( navlico_fsm_buttons[ DISABLED_BTN ].gpio_num ) |
+	#endif
+		0LL;
+
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up" );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_OFF_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_SAILING_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_DRIVING_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_ANCHORING_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_SAILING_COAST_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_DISABLED_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-#endif
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
+		ESP_ERROR_CHECK( gpio_wakeup_enable(
+			navlico_fsm_buttons[btn].gpio_num,
+			navlico_fsm_buttons[btn].active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
+		) );
 	ESP_ERROR_CHECK( esp_sleep_enable_gpio_wakeup() );
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up" );
 	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_DEEP_SLEEP_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_LOW ) );

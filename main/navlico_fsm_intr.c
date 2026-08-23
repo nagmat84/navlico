@@ -2,7 +2,6 @@
 /// Implements the interrupt-related routines for Navlico's Finite State Machine (FSM).
 
 #include "navlico_fsm.h"
-#include "navlico_gpio_defs.h"
 #include "sdkconfig.h"
 #include <esp_attr.h>
 #include <esp_log.h>
@@ -30,20 +29,13 @@ static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
  * See https://www.reddit.com/r/esp32/comments/1vtfldn/comment/p51c27o/
  */
 void enable_navlico_fsm_gpio_interrupts( void ) {
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_OFF_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DRIVING_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_ANCHORING_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_OFF_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_SAILING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_DRIVING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_ANCHORING_BUTTON ) );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_COAST_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DISABLED_BUTTON, GPIO_INTR_LOW_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_SAILING_COAST_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_DISABLED_BUTTON ) );
-#endif
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		ESP_ERROR_CHECK( gpio_set_intr_type(
+				navlico_fsm_buttons[btn].gpio_num,
+				navlico_fsm_buttons[btn].active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
+		) );
+		ESP_ERROR_CHECK( gpio_intr_enable( navlico_fsm_buttons[btn].gpio_num ) );
+	}
 }
 
 /**
@@ -57,20 +49,10 @@ void enable_navlico_fsm_gpio_interrupts( void ) {
  * An ISR can only call code from RAM.
  */
 void static IRAM_ATTR disable_navlico_fsm_gpio_interrupts( void ) {
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_OFF_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_SAILING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_DRIVING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_ANCHORING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_OFF_BUTTON, GPIO_INTR_DISABLE ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_BUTTON, GPIO_INTR_DISABLE ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DRIVING_BUTTON, GPIO_INTR_DISABLE ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_ANCHORING_BUTTON, GPIO_INTR_DISABLE ) );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_SAILING_COAST_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_DISABLED_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_COAST_BUTTON, GPIO_INTR_DISABLE ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DISABLED_BUTTON, GPIO_INTR_DISABLE ) );
-#endif
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		ESP_ERROR_CHECK( gpio_intr_disable( navlico_fsm_buttons[btn].gpio_num ) );
+		ESP_ERROR_CHECK( gpio_set_intr_type( navlico_fsm_buttons[btn].gpio_num, GPIO_INTR_DISABLE )	);
+	}
 }
 
 /**
@@ -113,14 +95,10 @@ void setup_navlico_fsm_isr( void ) {
 	dump_navlico_fsm_isr_config();
 	navlico_fsm_task_handle = xTaskGetCurrentTaskHandle();
 	ESP_ERROR_CHECK( gpio_install_isr_service( ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_OFF_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_SAILING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_DRIVING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_ANCHORING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_SAILING_COAST_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_DISABLED_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-#endif
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
+		ESP_ERROR_CHECK( gpio_isr_handler_add(
+			navlico_fsm_buttons[btn].gpio_num, handle_navlico_fsm_gpio_interrupt, nullptr
+		) );
 	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine registered" );
 	dump_navlico_fsm_isr_config();
 }

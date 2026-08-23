@@ -60,7 +60,7 @@ esp_err_t IRAM_ATTR navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void
 		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Expected sleep time of %" PRId64 " ms too short for deep sleep", sleep_time_us / 1000 );
 		return ESP_OK;
 	}
-	if ( get_navlico_fsm_state() != OFF ) {
+	if ( get_navlico_fsm_state() != OFF_STATE ) {
 		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Navlico FSM is not in OFF state; deep sleep not possible" );
 		return ESP_OK;
 	}

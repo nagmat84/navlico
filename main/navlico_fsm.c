@@ -6,7 +6,6 @@
 /// - `navlico_fsm_intr.c`: contains the interrupt-related code
 
 #include "navlico_fsm.h"
-#include "navlico_gpio_defs.h"
 #include "sdkconfig.h"
 #include <esp_attr.h>
 #include <esp_log.h>
@@ -18,7 +17,7 @@
 const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 
 /// The active operational state
-static RTC_DATA_ATTR navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
+static RTC_DATA_ATTR navlico_fsm_state_t navlico_fsm_state = INVALID_STATE;
 
 // Defined in `navlicao_fsm_gpio_setup.c`
 void setup_navlico_fsm_gpio();
@@ -42,24 +41,16 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins_after_start() {
 	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
 		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
 		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
-		if ( GPIO_MASK( GPIO_SAILING_BUTTON ) & wakeup_pin_mask )
-			return SAILING;
-		if ( GPIO_MASK( GPIO_DRIVING_BUTTON ) & wakeup_pin_mask )
-			return DRIVING;
-		if ( GPIO_MASK( GPIO_ANCHORING_BUTTON ) & wakeup_pin_mask )
-			return ANCHORING;
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-		if ( GPIO_MASK( GPIO_SAILING_COAST_BUTTON ) & wakeup_pin_mask )
-			return SAILING_COAST;
-		if ( GPIO_MASK( GPIO_DISABLED_BUTTON ) & wakeup_pin_mask )
-			return DISABLED;
-#endif
+		for ( navlico_fsm_state_t s = 0; s < STATE_COUNT; ++s ) {
+			if ( GPIO_MASK( navlico_fsm_buttons[navlico_fsm_states[s].button].gpio_num ) & wakeup_pin_mask )
+				return s;
+		}
 		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
-		return UNDEFINED;
+		return INVALID_STATE;
 	}
 
 	ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating OFF button had been pressed" );
-	return OFF;
+	return OFF_STATE;
 }
 
 /**
@@ -86,71 +77,42 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins() {
 	static constexpr useconds_t initialDebounceDelay = 20000;
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
 
-	uint_fast8_t offButtonLevel = 0;
-	uint_fast8_t sailingButtonLevel = 0;
-	uint_fast8_t drivingButtonLevel = 0;
-	uint_fast8_t anchoringButtonLevel = 0;
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	uint_fast8_t sailingCoastButtonLevel = 0;
-	uint_fast8_t disabledButtonLevel = 0;
-#endif
+	uint_fast8_t buttonLevels[ BTN_COUNT ];
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
 	// Repeated readings to debounce
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
-		offButtonLevel += gpio_get_level( GPIO_OFF_BUTTON );
-		sailingButtonLevel += gpio_get_level( GPIO_SAILING_BUTTON );
-		drivingButtonLevel += gpio_get_level( GPIO_DRIVING_BUTTON );
-		anchoringButtonLevel += gpio_get_level( GPIO_ANCHORING_BUTTON );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-		sailingCoastButtonLevel += gpio_get_level( GPIO_SAILING_COAST_BUTTON );
-		disabledButtonLevel += gpio_get_level( GPIO_DISABLED_BUTTON );
-#endif
+		for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
+			buttonLevels[btn] += ( gpio_get_level( navlico_fsm_buttons[btn].gpio_num ) == navlico_fsm_buttons[btn].active_level );
+		}
 		usleep( inbetweenDebounceDelay );
 	}
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	ESP_LOGD( NAVLICO_FSM_TAG,
-		  "Input pins have been read "
-		  "(offButtonLevel = %" PRIuFAST8 ", sailingButtonLevel = %" PRIuFAST8 ", sailingCoastButtonLevel = %" PRIuFAST8
-		  ", drivingButtonLevel = %" PRIuFAST8 ", anchoringButtonLevel = %" PRIuFAST8 ", disabledButtonLevel = %" PRIuFAST8 ")",
-		  offButtonLevel, sailingButtonLevel, sailingCoastButtonLevel, drivingButtonLevel, anchoringButtonLevel, disabledButtonLevel );
-#else
-	ESP_LOGD( NAVLICO_FSM_TAG,
-	          "Input pins have been read "
-	          "(offButtonLevel = %" PRIuFAST8 ", sailingButtonLevel = %" PRIuFAST8
-	          ", drivingButtonLevel = %" PRIuFAST8 ", anchoringButtonLevel = %" PRIuFAST8 ")",
-	          offButtonLevel, sailingButtonLevel, drivingButtonLevel, anchoringButtonLevel );
-#endif
-	if ( offButtonLevel > debounceProbes / 2 )
-		return OFF;
-	if ( sailingButtonLevel > debounceProbes / 2 )
-		return SAILING;
-	if ( drivingButtonLevel > debounceProbes / 2 )
-		return DRIVING;
-	if ( anchoringButtonLevel > debounceProbes / 2 )
-		return ANCHORING;
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	if ( sailingCoastButtonLevel > debounceProbes / 2 )
-		return SAILING_COAST;
-	if ( disabledButtonLevel > debounceProbes / 2 )
-		return DISABLED;
-#endif
+	for ( navlico_fsm_state_t s = 0; s < STATE_COUNT; ++s ) {
+		if ( buttonLevels[ navlico_fsm_states[s].button ] > debounceProbes / 2 )
+			return s;
+	}
 	ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
-	return UNDEFINED;
+	return INVALID_STATE;
+}
+
+/**
+ * Checks whether any of the button inputs is active
+ *
+ * @return True, if any of the button inputs is active; false otherwise
+ */
+bool static has_navlico_fsm_active_input( void ) {
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		if ( gpio_get_level( navlico_fsm_buttons[btn].gpio_num ) == navlico_fsm_buttons[btn].active_level )
+			return true;
+	}
+	return false;
 }
 
 /**
  * Waits until all input pins have become idle
  */
 void static wait_for_navlico_fsm_idle_input( void ) {
-	while ( gpio_get_level( GPIO_OFF_BUTTON ) == 1 ||
-	        gpio_get_level( GPIO_SAILING_BUTTON ) == 1 ||
-	        gpio_get_level( GPIO_DRIVING_BUTTON ) == 1 ||
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-	        gpio_get_level( GPIO_SAILING_COAST_BUTTON ) == 1 ||
-	        gpio_get_level( GPIO_DISABLED_BUTTON ) == 1 ||
-#endif
-	        gpio_get_level( GPIO_ANCHORING_BUTTON ) == 1 ) {
+	while ( has_navlico_fsm_active_input() ) {
 		vTaskDelay( pdMS_TO_TICKS( 10 ) );
 	}
 }
@@ -161,104 +123,26 @@ void static wait_for_navlico_fsm_idle_input( void ) {
  * This function uses the currently stored operational state in #operational_state to set the output pins.
  */
 void static write_navlico_fsm_output_pins( navlico_fsm_state_t const state ) {
-	switch ( state ) {
-		case UNDEFINED:
-			// TODO: We should do something else here and conspicuously indicate this error condition instead of just pretending to be in the "OFF" state.
-		case OFF:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: OFF" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 1 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 1 );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-			gpio_set_level(GPIO_SAILING_COAST_INDICATOR, 0 );
-			gpio_set_level(GPIO_DISABLED_INDICATOR, 0 );
-			gpio_set_level(GPIO_ALLROUND_GREEN_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_1_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_2_LIGHT, 1 );
-#endif
-			break;
-		case SAILING:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: SAILING" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 1 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 0 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 1 );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-			gpio_set_level(GPIO_SAILING_COAST_INDICATOR, 0 );
-			gpio_set_level(GPIO_DISABLED_INDICATOR, 0 );
-			gpio_set_level(GPIO_ALLROUND_GREEN_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_1_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_2_LIGHT, 1 );
-#endif
-			break;
-		case DRIVING:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: DRIVING" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 1 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 0 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 0 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 1 );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-			gpio_set_level(GPIO_SAILING_COAST_INDICATOR, 0 );
-			gpio_set_level(GPIO_DISABLED_INDICATOR, 0 );
-			gpio_set_level(GPIO_ALLROUND_GREEN_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_1_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_2_LIGHT, 1 );
-#endif
-			break;
-		case ANCHORING:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: ANCHORING" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 1 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 1 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 0 );
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-			gpio_set_level(GPIO_SAILING_COAST_INDICATOR, 0 );
-			gpio_set_level(GPIO_DISABLED_INDICATOR, 0 );
-			gpio_set_level(GPIO_ALLROUND_GREEN_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_1_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_2_LIGHT,1 );
-#endif
-			break;
-#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-		case SAILING_COAST:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: SAILING_COAST" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 0 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 1 );
-			gpio_set_level(GPIO_SAILING_COAST_INDICATOR, 1 );
-			gpio_set_level(GPIO_DISABLED_INDICATOR, 0 );
-			gpio_set_level(GPIO_ALLROUND_GREEN_LIGHT, 0 );
-			gpio_set_level(GPIO_ALLROUND_RED_1_LIGHT, 0 );
-			gpio_set_level(GPIO_ALLROUND_RED_2_LIGHT,1 );
-			break;
-		case DISABLED:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: DISABLED" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 1 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 1 );
-			gpio_set_level(GPIO_SAILING_COAST_INDICATOR, 0 );
-			gpio_set_level(GPIO_DISABLED_INDICATOR, 1 );
-			gpio_set_level(GPIO_ALLROUND_GREEN_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_RED_1_LIGHT, 0 );
-			gpio_set_level(GPIO_ALLROUND_RED_2_LIGHT,0 );
-			break;
-#endif
-	}
+	// Deactivate all indicator and lights
+	for ( navlico_fsm_indicator_t i = 0; i < IND_COUNT; ++i )
+		gpio_set_level( navlico_fsm_indicators[i].gpio_num, 1 - navlico_fsm_indicators[i].active_level );
+	for ( navlico_fsm_light_t l = 0; l < LIGHT_COUNT; ++l )
+		gpio_set_level( navlico_fsm_lights[l].gpio_num, 1 - navlico_fsm_lights[l].active_level );
+
+	// TODO: We should do something else here and conspicuously indicate this error condition instead of just pretending to be in the "OFF" state.
+	if ( state == INVALID_STATE )
+		return;
+
+	navlico_fsm_indicator_t const i = navlico_fsm_states[ state ].indicator;
+	navlico_fsm_light_t const l0 = navlico_fsm_states[ state ].lights[0];
+	navlico_fsm_light_t const l1 = navlico_fsm_states[ state ].lights[1];
+
+	if ( i != INVALID_IND )
+		gpio_set_level( navlico_fsm_indicators[i].gpio_num, navlico_fsm_indicators[i].active_level );
+	if ( l0 != INVALID_LIGHT )
+		gpio_set_level( navlico_fsm_lights[l0].gpio_num, navlico_fsm_lights[l0].active_level );
+	if ( l1 != INVALID_LIGHT )
+		gpio_set_level( navlico_fsm_lights[l1].gpio_num, navlico_fsm_lights[l1].active_level );
 }
 
 /**
@@ -289,7 +173,7 @@ navlico_fsm_state_t get_navlico_fsm_state( void ) {
  * If `false`, the function calls read_navlico_fsm_input_pins(void) which reads the current level of the input pins.
  */
 void static update_navlico_fsm_state( bool const firstRun ) {
-	navlico_fsm_state = UNDEFINED;
+	navlico_fsm_state = INVALID_STATE;
 	navlico_fsm_state_t const new_state = firstRun ?
 		read_navlico_fsm_input_pins_after_start() :
 		read_navlico_fsm_input_pins();

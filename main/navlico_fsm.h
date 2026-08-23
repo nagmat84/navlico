@@ -6,6 +6,8 @@
 #ifndef NAVLICO_NAVLICO_FSM_H
 #define NAVLICO_NAVLICO_FSM_H
 
+#include "sdkconfig.h"
+
 extern const char NAVLICO_FSM_TAG[];
 
 /**
@@ -14,11 +16,15 @@ extern const char NAVLICO_FSM_TAG[];
  * The operational state directly corresponds to the most recently pressed button and active indicator light.
  */
 typedef enum navlico_fsm_state_t_impl {
-	UNDEFINED = 0, ///< The FSM has never been executed (initial state) or is updating the state (transitional state)
-	OFF = 1,       ///< The user has pressed the OFF button, the operational state is OFF
-	SAILING = 2,   ///< The user has pressed the SAILING button, the operational state is SAILING
-	DRIVING = 3,   ///< The user has pressed the DRIVING button, the operational state is DRIVING
-	ANCHORING = 4  ///< The user has pressed the ANCHORING button, the operational state is ANCHORING
+	UNDEFINED = 0,     ///< The FSM has never been executed (initial state) or is updating the state (transitional state)
+	OFF = 1,           ///< The user has pressed the OFF button, the operational state is OFF
+	SAILING = 2,       ///< The user has pressed the SAILING button, the operational state is SAILING
+	DRIVING = 3,       ///< The user has pressed the DRIVING button, the operational state is DRIVING
+	ANCHORING = 4,     ///< The user has pressed the ANCHORING button, the operational state is ANCHORING
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+	SAILING_COAST = 5, ///< The user has pressed the SAILING COAST button, the operational state is SAILING COAST
+	DISABLED = 6       ///< The user has pressed the DISABLED button, the operational state is DISABLED
+#endif
 } navlico_fsm_state_t;
 
 navlico_fsm_state_t get_navlico_fsm_state( void );

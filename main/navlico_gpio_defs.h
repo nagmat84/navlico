@@ -6,50 +6,80 @@
 
 #include <driver/gpio.h>
 
-static constexpr gpio_num_t GPIO_OFF_BUTTON = GPIO_NUM_0;
-static constexpr gpio_num_t GPIO_SAILING_BUTTON = GPIO_NUM_10;
-static constexpr gpio_num_t GPIO_DRIVING_BUTTON = GPIO_NUM_11;
-static constexpr gpio_num_t GPIO_ANCHORING_BUTTON = GPIO_NUM_12;
+#define GPIO_MASK( gpio_num ) ( 1ULL << gpio_num )
 
-static constexpr gpio_num_t GPIO_SAILING_INDICATOR = GPIO_NUM_1;
-static constexpr gpio_num_t GPIO_DRIVING_INDICATOR = GPIO_NUM_2;
-static constexpr gpio_num_t GPIO_ANCHORING_INDICATOR = GPIO_NUM_3;
+// Buttons
 
-// GPIO 4 skipped on purpose as it is pull-up during boot and hence a connected light would go on during boot
-static constexpr gpio_num_t GPIO_SIDE_N_STERN_LIGHT = GPIO_NUM_5;
-static constexpr gpio_num_t GPIO_MASTHEAD_LIGHT = GPIO_DRIVING_INDICATOR;
-static constexpr gpio_num_t GPIO_ALLROUND_WHITE_LIGHT = GPIO_ANCHORING_INDICATOR;
+static constexpr gpio_num_t GPIO_OFF_BUTTON = GPIO_NUM_0;            // input-only
+static constexpr gpio_num_t GPIO_SAILING_BUTTON = GPIO_NUM_10;       // input-only
+static constexpr gpio_num_t GPIO_DRIVING_BUTTON = GPIO_NUM_11;       // combined input/output in open-drain mode (peer: MASTHEAD_LIGHT)
+static constexpr gpio_num_t GPIO_ANCHORING_BUTTON = GPIO_NUM_12;     // combined input/output in open-drain mode (peer: ALLROUND_WHITE_LIGHT)
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+static constexpr gpio_num_t GPIO_SAILING_COAST_BUTTON = GPIO_NUM_13; // combined input/output in open-drain mode (peer: ALLROUND_GREEN_LIGHT)
+static constexpr gpio_num_t GPIO_DISABLED_BUTTON = GPIO_NUM_14;      // combined input/output in open-drain mode (peer: ALLROUND_RED_2_LIGHT)
+#endif
 
-static constexpr uint64_t GPIO_OFF_BUTTON_MASK = 1ULL << GPIO_OFF_BUTTON;
-static constexpr uint64_t GPIO_SAILING_BUTTON_MASK = 1ULL << GPIO_SAILING_BUTTON;
-static constexpr uint64_t GPIO_DRIVING_BUTTON_MASK = 1ULL << GPIO_DRIVING_BUTTON;
-static constexpr uint64_t GPIO_ANCHORING_BUTTON_MASK = 1ULL << GPIO_ANCHORING_BUTTON;
+// Indicator Lights (all output-only in push-pull mode for PWM dimming)
 
-static constexpr uint64_t GPIO_SAILING_INDICATOR_MASK = 1ULL << GPIO_SAILING_INDICATOR;
-static constexpr uint64_t GPIO_DRIVING_INDICATOR_MASK = 1ULL << GPIO_DRIVING_INDICATOR;
-static constexpr uint64_t GPIO_ANCHORING_INDICATOR_MASK = 1ULL << GPIO_ANCHORING_INDICATOR;
+static constexpr gpio_num_t GPIO_SAILING_INDICATOR = GPIO_NUM_1;       // output-only in push-pull mode
+static constexpr gpio_num_t GPIO_DRIVING_INDICATOR = GPIO_NUM_2;       // output-only in push-pull mode
+static constexpr gpio_num_t GPIO_ANCHORING_INDICATOR = GPIO_NUM_3;     // output-only in push-pull mode
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+static constexpr gpio_num_t GPIO_SAILING_COAST_INDICATOR = GPIO_NUM_4; // output-only in push-pull mode
+static constexpr gpio_num_t GPIO_DISABLED_INDICATOR = GPIO_NUM_22;     // output-only in push-pull mode
+#endif
 
-static constexpr uint64_t GPIO_SIDE_N_STERN_LIGHT_MASK = 1ULL << GPIO_SIDE_N_STERN_LIGHT;
-static constexpr uint64_t GPIO_MASTHEAD_LIGHT_MASK = 1ULL << GPIO_MASTHEAD_LIGHT;
-static constexpr uint64_t GPIO_ALLROUND_WHITE_LIGHT_MASK = 1ULL << GPIO_ALLROUND_WHITE_LIGHT;
+// Navigational Lights
 
-static constexpr uint64_t GPIO_WAKEUP_BUTTONS_MASK =
-	GPIO_SAILING_BUTTON_MASK |
-	GPIO_DRIVING_BUTTON_MASK |
-	GPIO_ANCHORING_BUTTON_MASK;
+static constexpr gpio_num_t GPIO_SIDE_N_STERN_LIGHT = GPIO_NUM_5;    // output-only in open-drain mode
+static constexpr gpio_num_t GPIO_MASTHEAD_LIGHT = GPIO_NUM_11;       // combined input/output in open-drain mode (peer: DRIVING_BUTTON)
+static constexpr gpio_num_t GPIO_ALLROUND_WHITE_LIGHT = GPIO_NUM_12; // combined input/output in open-drain mode (peer: ANCHORING_BUTTON)
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+static constexpr gpio_num_t GPIO_ALLROUND_GREEN_LIGHT = GPIO_NUM_13; // combined input/output in open-drain mode (peer: SAILING_COAST_BUTTON)
+static constexpr gpio_num_t GPIO_ALLROUND_RED_1_LIGHT = GPIO_NUM_25;
+static constexpr gpio_num_t GPIO_ALLROUND_RED_2_LIGHT = GPIO_NUM_14; // combined input/output in open-drain mode (peer: DISABLED_BUTTON)
+#endif
 
-static constexpr uint64_t GPIO_ALL_BUTTONS_MASK =
-	GPIO_OFF_BUTTON_MASK |
-	GPIO_WAKEUP_BUTTONS_MASK;
+// Masks
 
-static constexpr uint64_t GPIO_ALL_INDICATORS_MASK =
-	GPIO_SAILING_INDICATOR_MASK |
-	GPIO_DRIVING_INDICATOR_MASK |
-	GPIO_ANCHORING_INDICATOR_MASK;
+static constexpr uint64_t GPIO_INPUT_ONLY_MASK =
+	GPIO_MASK( GPIO_OFF_BUTTON ) |
+	GPIO_MASK( GPIO_SAILING_BUTTON );
 
-static constexpr uint64_t GPIO_ALL_LIGHTS_MASK =
-	GPIO_SIDE_N_STERN_LIGHT_MASK |
-	GPIO_MASTHEAD_LIGHT_MASK |
-	GPIO_ALLROUND_WHITE_LIGHT_MASK;
+static constexpr uint64_t GPIO_COMBINED_IO_OPEN_DRAIN_MASK =
+	GPIO_MASK( GPIO_MASTHEAD_LIGHT ) |
+	GPIO_MASK( GPIO_ALLROUND_WHITE_LIGHT ) |
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+	GPIO_MASK( GPIO_ALLROUND_GREEN_LIGHT ) |
+	GPIO_MASK( GPIO_ALLROUND_RED_2_LIGHT ) |
+#endif
+	0LL;
+
+static constexpr uint64_t GPIO_OUTPUT_ONLY_PUSH_PULL_MASK =
+	GPIO_MASK( GPIO_SAILING_INDICATOR ) |
+	GPIO_MASK( GPIO_DRIVING_INDICATOR ) |
+	GPIO_MASK( GPIO_ANCHORING_INDICATOR ) |
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+	GPIO_MASK( GPIO_SAILING_COAST_INDICATOR ) |
+	GPIO_MASK( GPIO_DISABLED_INDICATOR ) |
+#endif
+	0LL;
+
+static constexpr uint64_t GPIO_OUTPUT_ONLY_OPEN_DRAIN_MASK =
+	GPIO_MASK( GPIO_SIDE_N_STERN_LIGHT ) |
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+	GPIO_MASK( GPIO_ALLROUND_RED_1_LIGHT ) |
+#endif
+	0LL;
+
+static constexpr uint64_t GPIO_DEEP_SLEEP_WAKEUP_BUTTONS_MASK =
+	GPIO_MASK( GPIO_SAILING_BUTTON ) |
+	GPIO_MASK( GPIO_DRIVING_BUTTON ) |
+	GPIO_MASK( GPIO_ANCHORING_BUTTON ) |
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+	GPIO_MASK( GPIO_SAILING_COAST_BUTTON ) |
+	GPIO_MASK( GPIO_DISABLED_BUTTON ) |
+#endif
+	0LL;
 
 #endif //NAVLICO_GPIO_DEFS_H

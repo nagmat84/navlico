@@ -16,8 +16,8 @@ static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
  * This function enables interrupts at their source, i.e. at the GPIO peripheral.
  * The function assumes that the interrupt is already (or still) allocated and the ISR installed.
  *
- * Enables the interrupt for all but `ignoredButton`.
- * Some buttons and navigational lights share a combined input/output line as peers.
+ * Enables the interrupt for all but `ignored_gpio`.
+ * Some buttons and navigational lights share a combined input/output GPIO.
  * When the FSM is in a state which drives such a GPIO, then that GPIO must not be set as an interrupt source as the
  * interrupt would immediately trigger.
  *
@@ -33,16 +33,16 @@ static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
  * So the LP/RTC pins are the only place you get true edge semantics across sleep.
  * See https://www.reddit.com/r/esp32/comments/1vtfldn/comment/p51c27o/
  *
- * @param ignoredButton The button for which no interrupt shall be enabled
+ * @param ignored_gpio The button which shall not be enabled as a wake-up source
  */
-void enable_navlico_fsm_gpio_interrupts( navlico_fsm_button_t ignoredButton ) {
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
-		if ( btn == ignoredButton ) continue;
+void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * const ignored_gpio ) {
+	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
+		if ( gpio == ignored_gpio ) continue;
 		ESP_ERROR_CHECK( gpio_set_intr_type(
-				navlico_fsm_buttons[btn].gpio_num,
-				navlico_fsm_buttons[btn].active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
+				gpio->num, gpio->active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
 		) );
-		ESP_ERROR_CHECK( gpio_intr_enable( navlico_fsm_buttons[btn].gpio_num ) );
+		ESP_ERROR_CHECK( gpio_intr_enable( gpio->num ) );
 	}
 }
 
@@ -57,9 +57,10 @@ void enable_navlico_fsm_gpio_interrupts( navlico_fsm_button_t ignoredButton ) {
  * An ISR can only call code from RAM.
  */
 void static IRAM_ATTR disable_navlico_fsm_gpio_interrupts( void ) {
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
-		ESP_ERROR_CHECK( gpio_intr_disable( navlico_fsm_buttons[btn].gpio_num ) );
-		ESP_ERROR_CHECK( gpio_set_intr_type( navlico_fsm_buttons[btn].gpio_num, GPIO_INTR_DISABLE )	);
+	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
+		ESP_ERROR_CHECK( gpio_intr_disable( gpio->num ) );
+		ESP_ERROR_CHECK( gpio_set_intr_type( gpio->num, GPIO_INTR_DISABLE ) );
 	}
 }
 
@@ -103,10 +104,12 @@ void setup_navlico_fsm_isr( void ) {
 	dump_navlico_fsm_isr_config();
 	navlico_fsm_task_handle = xTaskGetCurrentTaskHandle();
 	ESP_ERROR_CHECK( gpio_install_isr_service( ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM ) );
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
+	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 		ESP_ERROR_CHECK( gpio_isr_handler_add(
-			navlico_fsm_buttons[btn].gpio_num, handle_navlico_fsm_gpio_interrupt, nullptr
+			gpio->num, handle_navlico_fsm_gpio_interrupt, nullptr
 		) );
+	}
 	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine registered" );
 	dump_navlico_fsm_isr_config();
 }

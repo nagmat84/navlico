@@ -10,12 +10,8 @@
 void static dump_navlico_fsm_io_configuration( void ) {
 	static uint64_t mask = 0ULL;
 	if ( mask == 0ULL ) {
-		for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
-			mask |= GPIO_MASK( navlico_fsm_buttons[btn].gpio_num );
-		for ( navlico_fsm_indicator_t ind = 0; ind < IND_COUNT; ++ind )
-			mask |= GPIO_MASK( navlico_fsm_indicators[ind].gpio_num );
-		for ( navlico_fsm_light_t light = 0; light < LIGHT_COUNT; ++light )
-			mask |= GPIO_MASK( navlico_fsm_lights[light].gpio_num );
+		for ( navlico_fsm_gpio_tag_t g = 0; g < GPIO_COUNT; ++g )
+			mask |= GPIO_MASK( navlico_fsm_gpios[g].num );
 	}
 	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, mask );
@@ -29,11 +25,11 @@ void static dump_navlico_fsm_io_configuration( void ) {}
  *
  * @param gpio_def The GPIO definition (contains GPIO number and configuration)
  */
-void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_definition_t const * const gpio_def ) {
-	ESP_ERROR_CHECK( gpio_set_direction( gpio_def->gpio_num, gpio_def->gpio_mode ) );
-	ESP_ERROR_CHECK( gpio_set_pull_mode( gpio_def->gpio_num, GPIO_FLOATING ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( gpio_def->gpio_num ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( gpio_def->gpio_num, GPIO_INTR_DISABLE ) );
+void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_t const * const gpio_def ) {
+	ESP_ERROR_CHECK( gpio_set_direction( gpio_def->num, gpio_def->mode ) );
+	ESP_ERROR_CHECK( gpio_set_pull_mode( gpio_def->num, GPIO_FLOATING ) );
+	ESP_ERROR_CHECK( gpio_intr_disable( gpio_def->num ) );
+	ESP_ERROR_CHECK( gpio_set_intr_type( gpio_def->num, GPIO_INTR_DISABLE ) );
 }
 
 /**
@@ -47,12 +43,8 @@ void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_definition_t const
  */
 void static setup_navlico_fsm_gpio_functions( void ) {
 	dump_navlico_fsm_io_configuration();
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
-		setup_navlico_fsm_gpio_function( &navlico_fsm_buttons[btn] );
-	for ( navlico_fsm_indicator_t ind = 0; ind < IND_COUNT; ++ind )
-		setup_navlico_fsm_gpio_function( &navlico_fsm_indicators[ind] );
-	for ( navlico_fsm_light_t light = 0; light < LIGHT_COUNT; ++light )
-		setup_navlico_fsm_gpio_function( &navlico_fsm_lights[light] );
+	for ( navlico_fsm_gpio_tag_t g = 0; g < GPIO_COUNT; ++g )
+		setup_navlico_fsm_gpio_function( &navlico_fsm_gpios[g] );
 	dump_navlico_fsm_io_configuration();
 }
 
@@ -73,12 +65,8 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
 	// you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
 	// You can also keep this feature on and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
 	ESP_LOGD( NAVLICO_FSM_TAG, "Ensure the GPIOs keep configuration in light sleep" );
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
-		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_buttons[btn].gpio_num ) );
-	for ( navlico_fsm_indicator_t ind = 0; ind < IND_COUNT; ++ind )
-		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_indicators[ind].gpio_num ) );
-	for ( navlico_fsm_light_t light = 0; light < LIGHT_COUNT; ++light )
-		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_lights[light].gpio_num ) );
+	for ( navlico_fsm_gpio_tag_t g = 0; g < GPIO_COUNT; ++g )
+		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_gpios[g].num ) );
 
 	// See Datasheet Sec. 2.2
 	// Digital pins (GPIO0 ~ GPIO5, GPIO22 ~ GPIO27):
@@ -91,22 +79,22 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
 /**
  * Sets the wake-up sources.
  *
- * Enables all but `ignoredButton` as a wake-up source.
- * Some buttons and navigational lights share a combined input/output line as peers.
+ * Enables all but `ignored_gpio` as a wake-up source.
+ * Some buttons and navigational lights share a combined input/output GPIO.
  * When the FSM is in a state which drives such a GPIO, then that GPIO must not be set as a wake-up source as the
  * wake-up source would immediately trigger.
  *
- * @param ignoredButton The button which shall not be enabled as a wake-up source
+ * @param ignored_gpio The button which shall not be enabled as a wake-up source
  */
-void set_navlico_fsm_gpio_wakeup( navlico_fsm_button_t ignoredButton ) {
+void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * const ignored_gpio ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up" );
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
-		if ( btn == ignoredButton ) {
-			ESP_ERROR_CHECK( gpio_wakeup_disable( navlico_fsm_buttons[btn].gpio_num ) );
+	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
+		if ( gpio == ignored_gpio ) {
+			ESP_ERROR_CHECK( gpio_wakeup_disable( gpio->num ) );
 		} else {
 			ESP_ERROR_CHECK( gpio_wakeup_enable(
-				navlico_fsm_buttons[btn].gpio_num,
-				navlico_fsm_buttons[btn].active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
+				gpio->num, gpio->active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
 			) );
 		}
 	}
@@ -114,11 +102,11 @@ void set_navlico_fsm_gpio_wakeup( navlico_fsm_button_t ignoredButton ) {
 
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up" );
 	esp_sleep_disable_ext1_wakeup_io( 0 );
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
-		if ( btn == ignoredButton || !esp_sleep_is_valid_wakeup_gpio( navlico_fsm_buttons[btn].gpio_num ) ) continue;
+	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
+		if ( gpio == ignored_gpio || !esp_sleep_is_valid_wakeup_gpio( gpio->num ) ) continue;
 		ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io(
-			GPIO_MASK( navlico_fsm_buttons[ btn ].gpio_num ),
-			navlico_fsm_buttons[btn].active_level ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW
+			GPIO_MASK( gpio->num ), gpio->active_level ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW
 		) );
 	}
 }

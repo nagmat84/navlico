@@ -2,6 +2,7 @@
 /// Implements the Finite State Machine (FSM) handle the operational state and the associated GPIOs.
 ///
 /// In order to keep this file clean and focused on the actual FSM some aspects are moved out to dedicated source files:
+/// - `navlico_fsm_gpio_defs.c`: contains the static definitions of GPIOs, buttons, indicators and lights
 /// - `navlico_fsm_gpio_setup.c`: contains the (lengthy) boilerplate code to correctly set up the GPIOs
 /// - `navlico_fsm_intr.c`: contains the interrupt-related code
 
@@ -17,14 +18,14 @@
 const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 
 /// The active operational state
-static RTC_DATA_ATTR navlico_fsm_state_t navlico_fsm_state = INVALID_STATE;
+static RTC_DATA_ATTR navlico_fsm_state_t const * navlico_fsm_state = nullptr;
 
 // Defined in `navlicao_fsm_gpio_setup.c`
 void setup_navlico_fsm_gpio();
-void set_navlico_fsm_gpio_wakeup( navlico_fsm_button_t ignoredButton );
+void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio );
 // Defined in `navlicao_fsm_intr.c`
 void setup_navlico_fsm_isr( void );
-void enable_navlico_fsm_gpio_interrupts( navlico_fsm_button_t ignoredButton );
+void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio );
 
 /**
  * Reads the input pins and returns the currently or most recently pressed button.
@@ -35,23 +36,23 @@ void enable_navlico_fsm_gpio_interrupts( navlico_fsm_button_t ignoredButton );
  *
  * @return The button which was pressed to trigger the wake-up from deep sleep
  */
-navlico_fsm_state_t static read_navlico_fsm_input_pins_after_start() {
+static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
 	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
 
 	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
 		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
 		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
-		for ( navlico_fsm_state_t s = 0; s < STATE_COUNT; ++s ) {
-			if ( GPIO_MASK( navlico_fsm_buttons[navlico_fsm_states[s].button].gpio_num ) & wakeup_pin_mask )
-				return s;
+		for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+			if ( GPIO_MASK( navlico_fsm_buttons[b].gpio->num ) & wakeup_pin_mask )
+				return &navlico_fsm_buttons[b];
 		}
 		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
-		return INVALID_STATE;
+		return nullptr;
 	}
 
 	ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating OFF button had been pressed" );
-	return OFF_STATE;
+	return &navlico_fsm_buttons[OFF_BTN];
 }
 
 /**
@@ -64,7 +65,7 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins_after_start() {
  *
  * @return The currently or most recently pressed button.
  */
-navlico_fsm_state_t static read_navlico_fsm_input_pins() {
+static navlico_fsm_button_t const * read_navlico_fsm_input_pins() {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -78,22 +79,22 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins() {
 	static constexpr useconds_t initialDebounceDelay = 20000;
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
 
-	uint_fast8_t buttonLevels[ BTN_COUNT ];
+	uint_fast8_t btn_levels[ BTN_COUNT ];
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
 	// Repeated readings to debounce
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
-		for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
-			buttonLevels[btn] += ( gpio_get_level( navlico_fsm_buttons[btn].gpio_num ) == navlico_fsm_buttons[btn].active_level );
+		for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+			btn_levels[b] +=
+				gpio_get_level( navlico_fsm_buttons[b].gpio->num ) == navlico_fsm_buttons[b].gpio->active_level;
+			// We take the first button for which more than half of the probes indicated an active GPIO
+			if ( btn_levels[b] > debounceProbes / 2 )
+				return &navlico_fsm_buttons[b];
 		}
 		usleep( inbetweenDebounceDelay );
 	}
-	for ( navlico_fsm_state_t s = 0; s < STATE_COUNT; ++s ) {
-		if ( buttonLevels[ navlico_fsm_states[s].button ] > debounceProbes / 2 )
-			return s;
-	}
 	ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
-	return INVALID_STATE;
+	return nullptr;
 }
 
 /**
@@ -102,8 +103,8 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins() {
  * @return True, if any of the button inputs is active; false otherwise
  */
 bool static has_navlico_fsm_active_input( void ) {
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
-		if ( gpio_get_level( navlico_fsm_buttons[btn].gpio_num ) == navlico_fsm_buttons[btn].active_level )
+	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		if ( gpio_get_level( navlico_fsm_buttons[btn].gpio->num ) == navlico_fsm_buttons[btn].gpio->active_level )
 			return true;
 	}
 	return false;
@@ -123,40 +124,32 @@ void static wait_for_navlico_fsm_idle_input( void ) {
  *
  * This function uses the currently stored operational state in #operational_state to set the output pins.
  */
-void static write_navlico_fsm_output_pins( navlico_fsm_state_t const state ) {
+void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const state ) {
 	// Deactivate all indicator and lights
-	for ( navlico_fsm_indicator_t i = 0; i < IND_COUNT; ++i )
-		gpio_set_level( navlico_fsm_indicators[i].gpio_num, 1 - navlico_fsm_indicators[i].active_level );
-	for ( navlico_fsm_light_t l = 0; l < LIGHT_COUNT; ++l )
-		gpio_set_level( navlico_fsm_lights[l].gpio_num, 1 - navlico_fsm_lights[l].active_level );
+	for ( navlico_fsm_indicator_tag_t i = 0; i < IND_COUNT; ++i )
+		gpio_set_level( navlico_fsm_indicators[i].gpio->num, 1 - navlico_fsm_indicators[i].gpio->active_level );
+	for ( navlico_fsm_light_tag_t l = 0; l < LIGHT_COUNT; ++l )
+		gpio_set_level( navlico_fsm_lights[l].gpio->num, 1 - navlico_fsm_lights[l].gpio->active_level );
 
 	// TODO: We should do something else here and conspicuously indicate this error condition instead of just pretending to be in the "OFF" state.
-	if ( state == INVALID_STATE )
+	if ( state == nullptr )
 		return;
 
-	navlico_fsm_indicator_t const i = navlico_fsm_states[ state ].indicator;
-	navlico_fsm_light_t const l0 = navlico_fsm_states[ state ].lights[0];
-	navlico_fsm_light_t const l1 = navlico_fsm_states[ state ].lights[1];
-
-	if ( i != INVALID_IND )
-		gpio_set_level( navlico_fsm_indicators[i].gpio_num, navlico_fsm_indicators[i].active_level );
-	if ( l0 != INVALID_LIGHT )
-		gpio_set_level( navlico_fsm_lights[l0].gpio_num, navlico_fsm_lights[l0].active_level );
-	if ( l1 != INVALID_LIGHT )
-		gpio_set_level( navlico_fsm_lights[l1].gpio_num, navlico_fsm_lights[l1].active_level );
+	if ( state->indicator != nullptr )
+		gpio_set_level( state->indicator->gpio->num, state->indicator->gpio->active_level );
+	if ( state->lights[0] != nullptr )
+		gpio_set_level( state->lights[0]->gpio->num, state->lights[0]->gpio->active_level );
+	if ( state->lights[1] != nullptr )
+		gpio_set_level( state->lights[1]->gpio->num, state->lights[1]->gpio->active_level );
 }
 
 /**
- * Returns the current operational state of the FSM:
+ * Returns whether the FSM is ready for deep sleep
  *
- * The returned operational state equals `UNDEFINED` if
- * - the task has never read the inputs and set the state (initial state), or
- * - the task is currently in the middle of updating the state, but has not yet reached a consistent state again (transitional state)
- *
- * @return The current operational state of the FSM.
+ * @return True if the FSM is ready for deep sleep
  */
-navlico_fsm_state_t get_navlico_fsm_state( void ) {
-	return navlico_fsm_state;
+bool is_navlico_fsm_deep_sleep_ready( void ) {
+	return navlico_fsm_state == &navlico_fsm_states[OFF_STATE];
 }
 
 /**
@@ -174,10 +167,11 @@ navlico_fsm_state_t get_navlico_fsm_state( void ) {
  * If `false`, the function calls read_navlico_fsm_input_pins(void) which reads the current level of the input pins.
  */
 void static update_navlico_fsm_state( bool const firstRun ) {
-	navlico_fsm_state = INVALID_STATE;
-	navlico_fsm_state_t const new_state = firstRun ?
+	navlico_fsm_state = nullptr;
+	navlico_fsm_button_t const * const button = firstRun ?
 		read_navlico_fsm_input_pins_after_start() :
 		read_navlico_fsm_input_pins();
+	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
 	write_navlico_fsm_output_pins( new_state );
 	wait_for_navlico_fsm_idle_input();
 	navlico_fsm_state = new_state;
@@ -202,13 +196,13 @@ void navlico_fsm_task( void* ) {
 		// When the FSM is in a state which drives such a GPIO,
 		// then that GPIO must not be ignored as a wake-up and interrupt source
 		// as the wake-up source or interrupt would immediately trigger.
-		navlico_fsm_button_t const ignoredButton = navlico_fsm_states[navlico_fsm_state].button;
+		navlico_fsm_gpio_t const * const ignored_gpio = navlico_fsm_state ? navlico_fsm_state->button->gpio : nullptr;
 		// We have to (re-)enable the interrupts each time as the ISR disables the interrupts
 		// before it notifies the task to avoid interim interrupts piling up
 		// while the first interrupt is still being handled.
-		enable_navlico_fsm_gpio_interrupts( ignoredButton );
+		enable_navlico_fsm_gpio_interrupts( ignored_gpio );
 		// The wake-up source are not disabled, but we must (re-)set them as the ignored button may have changed.
-		set_navlico_fsm_gpio_wakeup( ignoredButton );
+		set_navlico_fsm_gpio_wakeup( ignored_gpio );
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		update_navlico_fsm_state( false );
 	}

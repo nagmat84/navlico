@@ -93,20 +93,14 @@ typedef enum navlico_fsm_light_t_impl : uint_fast8_t {
 
 /**
  * Defines the configuration of a single GPIO
- */
-typedef struct navlico_fsm_gpio_definition_t_impl navlico_fsm_gpio_definition_t;
-
-/**
- * Internal definition of navlico_fsm_gpio_definition_t
  *
  * @see navlico_fsm_gpio_definition_t
  */
-struct navlico_fsm_gpio_definition_t_impl {
+typedef struct navlico_fsm_gpio_definition_t_impl {
 	gpio_num_t gpio_num; ///< The number of GPIO
 	gpio_mode_t gpio_mode; ///< The operational mode of the GPIO: either `GPIO_MODE_INPUT`, `GPIO_MODE_INPUT_OUTPUT_OD`, `GPIO_MODE_OUTPUT` or `GPIO_MODE_OUTPUT_OD`.
 	uint32_t active_level; ///< Determines whether the pin is active high or active low: 1 = active high, 0 = active low
-	navlico_fsm_gpio_definition_t const * peer; ///< Points to the peer pin for a combined input/output pin, i.e. if `gpio_mode == GPIO_MODE_INPUT_OUTPUT_OD`; `nullptr` otherwise
-};
+} navlico_fsm_gpio_definition_t;
 
 /**
  * Defines an operational state
@@ -145,7 +139,7 @@ extern const navlico_fsm_gpio_definition_t navlico_fsm_buttons[ BTN_COUNT ];
  * All indicators are active high.
  * The operational mode is always `GPIO_MODE_OUTPUT` (i.e. push-pull mode) due to optional PWM dimming of the indicators.
  * Indicators use low-side switching via an NMOS.
- * Pins for indicators never share a signal line with a peer as otherwise PWM dimming wouldn't be possible.
+ * Pins for indicators never share a signal line as otherwise PWM dimming wouldn't be possible.
  *
  * @internal The ordering of this array must be kept in sync with the definition of the enum navlico_fsm_indicator_t.
  */

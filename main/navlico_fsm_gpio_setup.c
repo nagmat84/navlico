@@ -89,29 +89,38 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
 }
 
 /**
- * Configures necessary wake-up sources.
+ * Sets the wake-up sources.
+ *
+ * Enables all but `ignoredButton` as a wake-up source.
+ * Some buttons and navigational lights share a combined input/output line as peers.
+ * When the FSM is in a state which drives such a GPIO, then that GPIO must not be set as a wake-up source as the
+ * wake-up source would immediately trigger.
+ *
+ * @param ignoredButton The button which shall not be enabled as a wake-up source
  */
-void static setup_navlico_fsm_gpio_wakeup( void ) {
-	static uint64_t GPIO_DEEP_SLEEP_WAKEUP_BUTTONS_MASK;
-	GPIO_DEEP_SLEEP_WAKEUP_BUTTONS_MASK =
-		GPIO_MASK( navlico_fsm_buttons[ SAILING_BTN ].gpio_num ) |
-		GPIO_MASK( navlico_fsm_buttons[ DRIVING_BTN ].gpio_num ) |
-		GPIO_MASK( navlico_fsm_buttons[ ANCHORING_BTN ].gpio_num ) |
-	#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
-		GPIO_MASK( navlico_fsm_buttons[ SAILING_COAST_BTN ].gpio_num ) |
-		GPIO_MASK( navlico_fsm_buttons[ DISABLED_BTN ].gpio_num ) |
-	#endif
-		0LL;
-
+void set_navlico_fsm_gpio_wakeup( navlico_fsm_button_t ignoredButton ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up" );
-	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn )
-		ESP_ERROR_CHECK( gpio_wakeup_enable(
-			navlico_fsm_buttons[btn].gpio_num,
-			navlico_fsm_buttons[btn].active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
-		) );
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		if ( btn == ignoredButton ) {
+			ESP_ERROR_CHECK( gpio_wakeup_disable( navlico_fsm_buttons[btn].gpio_num ) );
+		} else {
+			ESP_ERROR_CHECK( gpio_wakeup_enable(
+				navlico_fsm_buttons[btn].gpio_num,
+				navlico_fsm_buttons[btn].active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL
+			) );
+		}
+	}
 	ESP_ERROR_CHECK( esp_sleep_enable_gpio_wakeup() );
+
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up" );
-	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_DEEP_SLEEP_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_LOW ) );
+	esp_sleep_disable_ext1_wakeup_io( 0 );
+	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		if ( btn == ignoredButton || !esp_sleep_is_valid_wakeup_gpio( navlico_fsm_buttons[btn].gpio_num ) ) continue;
+		ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io(
+			GPIO_MASK( navlico_fsm_buttons[ btn ].gpio_num ),
+			navlico_fsm_buttons[btn].active_level ? ESP_EXT1_WAKEUP_ANY_HIGH : ESP_EXT1_WAKEUP_ANY_LOW
+		) );
+	}
 }
 
 /**
@@ -120,5 +129,4 @@ void static setup_navlico_fsm_gpio_wakeup( void ) {
 void setup_navlico_fsm_gpio( void ) {
 	setup_navlico_fsm_gpio_functions();
 	setup_navlico_fsm_gpio_power_mgmt();
-	setup_navlico_fsm_gpio_wakeup();
 }

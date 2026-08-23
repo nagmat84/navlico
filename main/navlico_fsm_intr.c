@@ -16,6 +16,11 @@ static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
  * This function enables interrupts at their source, i.e. at the GPIO peripheral.
  * The function assumes that the interrupt is already (or still) allocated and the ISR installed.
  *
+ * Enables the interrupt for all but `ignoredButton`.
+ * Some buttons and navigational lights share a combined input/output line as peers.
+ * When the FSM is in a state which drives such a GPIO, then that GPIO must not be set as an interrupt source as the
+ * interrupt would immediately trigger.
+ *
  * @internal The interrupt must trigger upon a high input level, a rising edge is not sufficient.
  * During (light) sleep a rising edge is not detected and the ISR will never be called.
  * `gpio_wakeup_enable only` only accepts the two level types for a reason:
@@ -27,9 +32,12 @@ static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
  * The detector latches the rising edge and holds it until the CPU is back up.
  * So the LP/RTC pins are the only place you get true edge semantics across sleep.
  * See https://www.reddit.com/r/esp32/comments/1vtfldn/comment/p51c27o/
+ *
+ * @param ignoredButton The button for which no interrupt shall be enabled
  */
-void enable_navlico_fsm_gpio_interrupts( void ) {
+void enable_navlico_fsm_gpio_interrupts( navlico_fsm_button_t ignoredButton ) {
 	for ( navlico_fsm_button_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		if ( btn == ignoredButton ) continue;
 		ESP_ERROR_CHECK( gpio_set_intr_type(
 				navlico_fsm_buttons[btn].gpio_num,
 				navlico_fsm_buttons[btn].active_level ? GPIO_INTR_HIGH_LEVEL : GPIO_INTR_LOW_LEVEL

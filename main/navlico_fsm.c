@@ -21,9 +21,10 @@ static RTC_DATA_ATTR navlico_fsm_state_t navlico_fsm_state = INVALID_STATE;
 
 // Defined in `navlicao_fsm_gpio_setup.c`
 void setup_navlico_fsm_gpio();
+void set_navlico_fsm_gpio_wakeup( navlico_fsm_button_t ignoredButton );
 // Defined in `navlicao_fsm_intr.c`
 void setup_navlico_fsm_isr( void );
-void enable_navlico_fsm_gpio_interrupts( void );
+void enable_navlico_fsm_gpio_interrupts( navlico_fsm_button_t ignoredButton );
 
 /**
  * Reads the input pins and returns the currently or most recently pressed button.
@@ -197,10 +198,17 @@ void navlico_fsm_task( void* ) {
 
 	// ReSharper disable once CppDFAEndlessLoop
 	while ( true ) {
+		// Some buttons and navigational lights share a combined input/output line as peers.
+		// When the FSM is in a state which drives such a GPIO,
+		// then that GPIO must not be ignored as a wake-up and interrupt source
+		// as the wake-up source or interrupt would immediately trigger.
+		navlico_fsm_button_t const ignoredButton = navlico_fsm_states[navlico_fsm_state].button;
 		// We have to (re-)enable the interrupts each time as the ISR disables the interrupts
 		// before it notifies the task to avoid interim interrupts piling up
 		// while the first interrupt is still being handled.
-		enable_navlico_fsm_gpio_interrupts();
+		enable_navlico_fsm_gpio_interrupts( ignoredButton );
+		// The wake-up source are not disabled, but we must (re-)set them as the ignored button may have changed.
+		set_navlico_fsm_gpio_wakeup( ignoredButton );
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		update_navlico_fsm_state( false );
 	}

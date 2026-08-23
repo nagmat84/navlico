@@ -308,6 +308,7 @@ void navlico_fsm_task( void* ) {
 		enable_navlico_fsm_gpio_interrupts( ignored_gpio );
 		// The wake-up source are not disabled, but we must (re-)set them as the ignored button may have changed.
 		set_navlico_fsm_gpio_wakeup( ignored_gpio, is_navlico_fsm_deep_sleep_ready() );
+		// TODO: Receive pointer to button from the notification and pass it to the update function
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		update_navlico_fsm_state( false );
 	}

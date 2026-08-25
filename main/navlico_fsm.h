@@ -31,8 +31,24 @@ typedef enum navlico_fsm_state_tag_t : uint_fast8_t {
 } navlico_fsm_state_tag_t;
 
 typedef enum navlico_fsm_gpio_tag_t : uint_fast8_t {
-	GPIO_0, GPIO_1, GPIO_2, GPIO_3, GPIO_4, GPIO_5, GPIO_10, GPIO_11, GPIO_12, GPIO_13, GPIO_14, GPIO_22, GPIO_25,
-	GPIO_COUNT, INVALID_GPIO = GPIO_COUNT
+	GPIO_0,
+	GPIO_1,
+	GPIO_2,
+	GPIO_3,
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+	GPIO_4,
+#endif
+	GPIO_5,
+	GPIO_10,
+	GPIO_11,
+	GPIO_12,
+#ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED
+	GPIO_13,
+	GPIO_14,
+	GPIO_22,
+	GPIO_25,
+#endif
+	GPIO_COUNT
 } navlico_fsm_gpio_tag_t;
 
 /**

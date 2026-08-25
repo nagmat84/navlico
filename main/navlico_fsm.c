@@ -110,13 +110,48 @@ bool static has_navlico_fsm_active_input( void ) {
 	return false;
 }
 
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+void static dump_navlico_fsm_input_state( void ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... " );
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ GPIO Label │ Button # │ Button Label  │ Level │ Active │" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼────────────┼──────────┼───────────────┼───────┼────────┤" );
+	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		int const level = gpio_get_level( navlico_fsm_buttons[btn].gpio->num );
+		ESP_LOGD(
+			NAVLICO_FSM_TAG,
+			"│ %6.1d │ %-10.10s │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │",
+			navlico_fsm_buttons[btn].gpio->num,
+			navlico_fsm_buttons[btn].gpio->label,
+			btn,
+			navlico_fsm_buttons[btn].label,
+			level,
+			level == navlico_fsm_buttons[btn].gpio->active_level ? 'x' : ' '
+		);
+	}
+	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... finished" );
+}
+#endif
+
 /**
  * Waits until all input pins have become idle
  */
 void static wait_for_navlico_fsm_idle_input( void ) {
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+	unsigned int counter = 0;
+	while ( has_navlico_fsm_active_input() ) {
+		vTaskDelay( pdMS_TO_TICKS( 10 ) );
+		if ( counter % 200 == 0 ) {
+			dump_navlico_fsm_input_state();
+			counter = 1;
+		} else {
+			counter++;
+		}
+	}
+#else
 	while ( has_navlico_fsm_active_input() ) {
 		vTaskDelay( pdMS_TO_TICKS( 10 ) );
 	}
+#endif
 }
 
 /**
@@ -173,6 +208,7 @@ void static update_navlico_fsm_state( bool const firstRun ) {
 		read_navlico_fsm_input_pins();
 	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
 	write_navlico_fsm_output_pins( new_state );
+	ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );
 	wait_for_navlico_fsm_idle_input();
 	navlico_fsm_state = new_state;
 }

@@ -6,14 +6,15 @@
 #include <esp_log.h>
 #include <esp_sleep.h>
 
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 void static dump_navlico_fsm_io_configuration( void ) {
 	static uint64_t mask = 0ULL;
 	if ( mask == 0ULL ) {
 		for ( navlico_fsm_gpio_tag_t g = 0; g < GPIO_COUNT; ++g )
 			mask |= GPIO_MASK( navlico_fsm_gpios[g].num );
 	}
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
+	esp_log_level_t const level = esp_log_level_get( NAVLICO_FSM_TAG );
+	if ( level == ESP_LOG_DEBUG || level == ESP_LOG_VERBOSE )
 		gpio_dump_io_configuration( stdout, mask );
 }
 #else
@@ -115,6 +116,8 @@ void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * const ignored_gpio 
  * Set up the GPIOs for Navlico's FSM.
  */
 void setup_navlico_fsm_gpio( void ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "Setting up GPIOs ..." );
 	setup_navlico_fsm_gpio_functions();
 	setup_navlico_fsm_gpio_power_mgmt();
+	ESP_LOGD( NAVLICO_FSM_TAG, "GPIOs set up" );
 }

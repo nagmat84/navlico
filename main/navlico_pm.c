@@ -17,7 +17,7 @@
 
 static constexpr DRAM_ATTR char NAVLICO_PM_TAG[] = "navlico_pm";
 
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 
 static constexpr DRAM_ATTR char NAVLICO_PM_LIGHT_STR[] = "light";
 static constexpr DRAM_ATTR char NAVLICO_PM_DEEP_STR[] = "deep";
@@ -53,7 +53,7 @@ void log_navlico_pm_time_since_deep_sleep( void ) {
  * @return Result of the underlying `esp_deep_sleep_try_to_start()`.
  */
 esp_err_t IRAM_ATTR navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void *arg ) {
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 	gettimeofday( &navlico_pm_deep_sleep_enter_time, nullptr );
 #endif
 	if ( sleep_time_us < CONFIG_NAVLICO_DEEP_SLEEP_THRESHOLD_MS * 1000 ) {
@@ -94,7 +94,7 @@ void setup_power_management( void ) {
 	};
 	ESP_ERROR_CHECK( esp_pm_configure( &pm_config ) );
 
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 	esp_pm_sleep_cbs_register_config_t pm_cb_log_config = {
 		.enter_cb = log_navlico_pm_enter_sleep,
 		.exit_cb = log_navlico_pm_exit_sleep,

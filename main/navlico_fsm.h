@@ -109,6 +109,7 @@ typedef struct navlico_fsm_state_t navlico_fsm_state_t;
  */
 struct navlico_fsm_gpio_t {
 	navlico_fsm_gpio_tag_t tag; ///< The tag of the GPIO definition
+	char const * const label; ///< A printable name
 	gpio_num_t num; ///< The number of GPIO
 	gpio_mode_t mode; ///< The operational mode of the GPIO: either `GPIO_MODE_INPUT`, `GPIO_MODE_INPUT_OUTPUT_OD`, `GPIO_MODE_OUTPUT` or `GPIO_MODE_OUTPUT_OD`.
 	uint32_t active_level; ///< Determines whether the pin is active high or active low: 1 = active high, 0 = active low
@@ -124,6 +125,7 @@ struct navlico_fsm_gpio_t {
  */
 struct navlico_fsm_button_t {
 	navlico_fsm_button_tag_t tag; ///< The tag of the button definition
+	char const * const label; ///< A printable name
 	navlico_fsm_gpio_t const * gpio; ///< The associated GPIO configuration
 	navlico_fsm_state_t const * state; ///< The state which this button triggers
 };
@@ -137,6 +139,7 @@ struct navlico_fsm_button_t {
  */
 struct navlico_fsm_indicator_t {
 	navlico_fsm_indicator_tag_t tag; ///< The tag of the indicator definition
+	char const * const label; ///< A printable name
 	navlico_fsm_gpio_t const * gpio; ///< The associated GPIO configuration
 	navlico_fsm_state_t const * state; ///< The state which this indicator signals
 };
@@ -151,6 +154,7 @@ struct navlico_fsm_indicator_t {
  */
 struct navlico_fsm_light_t {
 	navlico_fsm_light_tag_t tag; ///< The tag of the light definition
+	char const * const label; ///< A printable name
 	navlico_fsm_gpio_t const * gpio; ///< The associated GPIO configuration
 };
 
@@ -164,6 +168,7 @@ struct navlico_fsm_light_t {
  */
 struct navlico_fsm_state_t {
 	navlico_fsm_state_tag_t tag; ///< The tag of the state definition
+	char const * const label; ///< A printable name
 	navlico_fsm_button_t const * button; ///< The button which triggered the state
 	navlico_fsm_indicator_t const * indicator; ///< The indicator which signals the state
 	/**

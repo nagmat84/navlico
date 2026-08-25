@@ -56,16 +56,19 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
 }
 
 /**
- * Reads the input pins and returns the currently or most recently pressed button.
+ * Reads the input pins and returns the currently pressed button.
+ *
+ * When finding the currently pressed button, this function skips `ignored_gpio`.
  *
  * This function is called whenever the inputs should be handled:
  *  - after waking up from light sleep
  *  - during normal runtime
  *  - after the interrupt-service routine (ISR) notified this task
  *
+ * @param ignored_gpio GPIO to ignore when finding the pressed button
  * @return The currently or most recently pressed button.
  */
-static navlico_fsm_button_t const * read_navlico_fsm_input_pins() {
+static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpio_t const * ignored_gpio ) {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -80,18 +83,42 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins() {
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
 
 	uint_fast8_t btn_levels[ BTN_COUNT ];
+	for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b )
+		btn_levels[b] = 0;
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
 	// Repeated readings to debounce
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
 		for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+			navlico_fsm_gpio_t const * gpio = navlico_fsm_buttons[b].gpio;
+			if ( gpio == ignored_gpio ) continue;
 			btn_levels[b] +=
-				gpio_get_level( navlico_fsm_buttons[b].gpio->num ) == navlico_fsm_buttons[b].gpio->active_level;
-			// We take the first button for which more than half of the probes indicated an active GPIO
-			if ( btn_levels[b] > debounceProbes / 2 )
-				return &navlico_fsm_buttons[b];
+				gpio_get_level( gpio->num ) == gpio->active_level;
 		}
 		usleep( inbetweenDebounceDelay );
+	}
+#ifdef CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ GPIO Label │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼────────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
+	for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[b].gpio;
+		ESP_LOGD(
+			NAVLICO_FSM_TAG,
+			"│ %6.1d │ %-10.10s │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
+			gpio->num,
+			gpio->label,
+			b,
+			navlico_fsm_buttons[b].label,
+			btn_levels[b],
+			btn_levels[b] > debounceProbes / 2 ? 'x' : ' ',
+			gpio == ignored_gpio ? 'x' : ' '
+		);
+	}
+#endif
+	for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+		// We take the first button for which more than half of the probes indicated an active GPIO
+		if ( btn_levels[b] > debounceProbes / 2 )
+			return &navlico_fsm_buttons[b];
 	}
 	ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
 	return nullptr;
@@ -208,10 +235,11 @@ bool is_navlico_fsm_deep_sleep_ready( void ) {
  * If `false`, the function calls read_navlico_fsm_input_pins(void) which reads the current level of the input pins.
  */
 void static update_navlico_fsm_state( bool const firstRun ) {
+	navlico_fsm_state_t const * const prev_state = navlico_fsm_state;
 	navlico_fsm_state = nullptr;
 	navlico_fsm_button_t const * const button = firstRun ?
 		read_navlico_fsm_input_pins_after_start() :
-		read_navlico_fsm_input_pins();
+		read_navlico_fsm_input_pins( prev_state ? prev_state->button->gpio : nullptr );
 	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
 	write_navlico_fsm_output_pins( new_state );
 	ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );

@@ -98,12 +98,14 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins() {
 }
 
 /**
- * Checks whether any of the button inputs is active
+ * Checks whether any of the button inputs but the ignored one is active
  *
+ * @param ignored_gpio The GPIO which shall be ignored when determining whether any button is active
  * @return True, if any of the button inputs is active; false otherwise
  */
-bool static has_navlico_fsm_active_input( void ) {
+bool static has_navlico_fsm_active_input( navlico_fsm_gpio_t const * ignored_gpio ) {
 	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		if ( navlico_fsm_buttons[btn].gpio == ignored_gpio ) continue;
 		if ( gpio_get_level( navlico_fsm_buttons[btn].gpio->num ) == navlico_fsm_buttons[btn].gpio->active_level )
 			return true;
 	}
@@ -111,21 +113,23 @@ bool static has_navlico_fsm_active_input( void ) {
 }
 
 #if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
-void static dump_navlico_fsm_input_state( void ) {
+void static dump_navlico_fsm_input_state( navlico_fsm_gpio_t const * ignored_gpio ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... " );
-	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ GPIO Label │ Button # │ Button Label  │ Level │ Active │" );
-	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼────────────┼──────────┼───────────────┼───────┼────────┤" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ GPIO Label │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼────────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
 	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
-		int const level = gpio_get_level( navlico_fsm_buttons[btn].gpio->num );
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
+		int const level = gpio_get_level( gpio->num );
 		ESP_LOGD(
 			NAVLICO_FSM_TAG,
-			"│ %6.1d │ %-10.10s │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │",
-			navlico_fsm_buttons[btn].gpio->num,
-			navlico_fsm_buttons[btn].gpio->label,
+			"│ %6.1d │ %-10.10s │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
+			gpio->num,
+			gpio->label,
 			btn,
 			navlico_fsm_buttons[btn].label,
 			level,
-			level == navlico_fsm_buttons[btn].gpio->active_level ? 'x' : ' '
+			level == gpio->active_level ? 'x' : ' ',
+			gpio == ignored_gpio ? 'x' : ' '
 		);
 	}
 	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... finished" );
@@ -133,15 +137,17 @@ void static dump_navlico_fsm_input_state( void ) {
 #endif
 
 /**
- * Waits until all input pins have become idle
+ * Waits until all input pins but the ignored one have become idle
+ *
+ * @param ignored_gpio The GPIO which shall be ignored when waiting for all pins to become idle
  */
-void static wait_for_navlico_fsm_idle_input( void ) {
+void static wait_for_navlico_fsm_idle_input( navlico_fsm_gpio_t const * ignored_gpio ) {
 #if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 	unsigned int counter = 0;
-	while ( has_navlico_fsm_active_input() ) {
+	while ( has_navlico_fsm_active_input( ignored_gpio ) ) {
 		vTaskDelay( pdMS_TO_TICKS( 10 ) );
 		if ( counter % 200 == 0 ) {
-			dump_navlico_fsm_input_state();
+			dump_navlico_fsm_input_state( ignored_gpio );
 			counter = 1;
 		} else {
 			counter++;
@@ -209,7 +215,7 @@ void static update_navlico_fsm_state( bool const firstRun ) {
 	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
 	write_navlico_fsm_output_pins( new_state );
 	ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );
-	wait_for_navlico_fsm_idle_input();
+	wait_for_navlico_fsm_idle_input( new_state->button->gpio );
 	navlico_fsm_state = new_state;
 }
 

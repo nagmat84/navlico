@@ -193,22 +193,41 @@ void static wait_for_navlico_fsm_idle_input( navlico_fsm_gpio_t const * ignored_
  * This function uses the currently stored operational state in #operational_state to set the output pins.
  */
 void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const state ) {
+	ESP_LOGI( NAVLICO_FSM_TAG, "Writing output pins" );
 	// Deactivate all indicator and lights
 	for ( navlico_fsm_indicator_tag_t i = 0; i < IND_COUNT; ++i )
-		gpio_set_level( navlico_fsm_indicators[i].gpio->num, 1 - navlico_fsm_indicators[i].gpio->active_level );
+		ESP_ERROR_CHECK( gpio_set_level( navlico_fsm_indicators[i].gpio->num, 1 - navlico_fsm_indicators[i].gpio->active_level ) );
 	for ( navlico_fsm_light_tag_t l = 0; l < LIGHT_COUNT; ++l )
-		gpio_set_level( navlico_fsm_lights[l].gpio->num, 1 - navlico_fsm_lights[l].gpio->active_level );
+		ESP_ERROR_CHECK( gpio_set_level( navlico_fsm_lights[l].gpio->num, 1 - navlico_fsm_lights[l].gpio->active_level ) );
 
 	// TODO: We should do something else here and conspicuously indicate this error condition instead of just pretending to be in the "OFF" state.
 	if ( state == nullptr )
 		return;
 
-	if ( state->indicator != nullptr )
-		gpio_set_level( state->indicator->gpio->num, state->indicator->gpio->active_level );
-	if ( state->lights[0] != nullptr )
-		gpio_set_level( state->lights[0]->gpio->num, state->lights[0]->gpio->active_level );
-	if ( state->lights[1] != nullptr )
-		gpio_set_level( state->lights[1]->gpio->num, state->lights[1]->gpio->active_level );
+	if ( state->indicator != nullptr ) {
+		navlico_fsm_gpio_t const * const gpio = state->indicator->gpio;
+		ESP_LOGD(
+			NAVLICO_FSM_TAG, "Setting indictor %d (\"%s\") on GPIO %d (\"%s\") to level %d",
+			state->indicator->tag, state->indicator->label, gpio->num, gpio->label, gpio->active_level
+		);
+		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
+	}
+	if ( state->lights[0] != nullptr ) {
+		navlico_fsm_gpio_t const * const gpio = state->lights[0]->gpio;
+		ESP_LOGD(
+			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d (\"%s\") to level %d",
+			state->lights[0]->tag, state->lights[0]->label, gpio->num, gpio->label, gpio->active_level
+		);
+		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
+	}
+	if ( state->lights[1] != nullptr ) {
+		navlico_fsm_gpio_t const * const gpio = state->lights[1]->gpio;
+		ESP_LOGD(
+			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d (\"%s\") to level %d",
+			state->lights[1]->tag, state->lights[1]->label, gpio->num, gpio->label, gpio->active_level
+		);
+		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
+	}
 }
 
 /**

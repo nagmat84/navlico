@@ -46,7 +46,7 @@ static constexpr DRAM_ATTR char SAILING_COAST_LABEL[] = "Sailing Coast";
 static constexpr DRAM_ATTR char DISABLED_LABEL[] = "Disabled";
 #endif
 
-static constexpr DRAM_ATTR char SIDE_N_STERN_LABEL[] = "Off";
+static constexpr DRAM_ATTR char SIDE_N_STERN_LABEL[] = "Side & Stern";
 static constexpr DRAM_ATTR char MASTHEAD_LABEL[] = "Masthead";
 static constexpr DRAM_ATTR char ALLROUND_WHITE_LABEL[] = "Allround White";
 #ifdef CONFIG_NAVLICO_VARIANT_FULL_FLEDGED

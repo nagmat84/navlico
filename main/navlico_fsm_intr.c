@@ -33,7 +33,7 @@ static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
  * So the LP/RTC pins are the only place you get true edge semantics across sleep.
  * See https://www.reddit.com/r/esp32/comments/1vtfldn/comment/p51c27o/
  *
- * @param ignored_gpio The button which shall not be enabled as a wake-up source
+ * @param ignored_gpio The GPIO which shall not be enabled as a wake-up source
  */
 void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * const ignored_gpio ) {
 	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {

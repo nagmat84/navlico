@@ -85,7 +85,7 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
  * When the FSM is in a state which drives such a GPIO, then that GPIO must not be set as a wake-up source as the
  * wake-up source would immediately trigger.
  *
- * @param ignored_gpio The button which shall not be enabled as a wake-up source
+ * @param ignored_gpio The GPIO which shall not be enabled as a wake-up source
  */
 void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * const ignored_gpio ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up" );

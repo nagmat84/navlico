@@ -14,7 +14,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <unistd.h>
-#include <driver/rtc_io.h>
 
 const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 
@@ -59,14 +58,14 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
 /**
  * Reads the input pins and returns the currently pressed button.
  *
- * When finding the currently pressed button, this function skips `ignored_gpio`.
+ * While searching for the currently pressed button, this function skips `ignored_gpio`.
  *
  * This function is called whenever the inputs should be handled:
  *  - after waking up from light sleep
  *  - during normal runtime
  *  - after the interrupt-service routine (ISR) notified this task
  *
- * @param ignored_gpio GPIO to ignore when finding the pressed button
+ * @param ignored_gpio GPIO to ignore while searching for the the pressed button
  * @return The currently or most recently pressed button.
  */
 static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpio_t const * ignored_gpio ) {
@@ -180,7 +179,7 @@ void static wait_for_navlico_fsm_idle_input( navlico_fsm_gpio_t const * ignored_
 		}
 	}
 #else
-	while ( has_navlico_fsm_active_input() ) {
+	while ( has_navlico_fsm_active_input( ignored_gpio ) ) {
 		vTaskDelay( pdMS_TO_TICKS( 10 ) );
 	}
 #endif
@@ -201,7 +200,7 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 	navlico_fsm_gpio_t const * const light_0_gpio = state->lights[0] ? state->lights[0]->gpio : nullptr;
 	navlico_fsm_gpio_t const * const light_1_gpio = state->lights[1] ? state->lights[1]->gpio : nullptr;
 
-	// Deactivate all indicator and lights but those who might be re-enabled anyway to avoid flicker
+	// Deactivate all indicator and lights but skip those who might be re-enabled anyway to avoid flicker
 	for ( navlico_fsm_indicator_id_t i = 0; i < IND_COUNT; ++i ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_indicators[i].gpio;
 		if ( gpio == indicator_gpio ) continue;

@@ -24,11 +24,42 @@ void static dump_navlico_fsm_io_configuration( void ) {}
 /**
  * Configures a single GPIO
  *
+ * @internal This function explicitly sets the pin direction and pull mode during (light) sleep via
+ * `gpio_sleep_set_direction()` and `gpio_sleep_set_pull_mode()`.
+ * Navlico does not use `gpio_sleep_sel_dis()` for each pin, because its **effect does not last.**
+ * Navlico uses the build options `CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND` and `ESP_SLEEP_FLASH_LEAKAGE_WORKAROUND`
+ * as they mitigate some nasty effects (see documentation of those build options) and they are enabled by default
+ * anyway.
+ * However, `CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND` overacts and comes with a stupid restriction:
+ * Each time Naviclo re-configures which GPIOs should act as wake-up sources with `gpio_wakeup_disable` or
+ * `gpio_wakeup_enable` the framework also calls `gpio_sleep_sel_en()` and hence `gpio_sleep_sel_dis()` becomes
+ * useless.
+ * (IMHO, `gpio_wakeup_disable` shouldn't internally call `gpio_sleep_sel_en()`
+ * no matter whether `CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND` is or is not set.)
+ * `CONFIG_ESP_SLEEP_GPIO_RESET_WORKAROUND` enables the same code paths as the build option `CONFIG_PM_SLP_DISABLE_GPIO`.
+ * For this build option the documentation
+ * [Espressif: ](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-disable-gpio)
+ * states
+ *
+ * > `CONFIG_PM_SLP_DISABLE_GPIO`
+ * >
+ * > If you want to specifically use some pins normally as chip wakes when chip sleeps,
+ * > you can call `gpio_sleep_sel_dis` to disable this feature on those pins.
+ * > You can also keep this feature on and call `gpio_sleep_set_direction` and `gpio_sleep_set_pull_mode`
+ * > to have a different GPIO configuration at sleep.
+ *
+ * However, as stated above `gpio_sleep_sel_dis` has no lasting effect.
+ * Hence, using `gpio_sleep_set_direction` and `gpio_sleep_set_pull_mode` are the only reliable option.
+ * While Navlico _doesn't_ want a _different_ GPIO configuration, Navilco still uses  `gpio_sleep_set_direction` and
+ * `gpio_sleep_set_pull_mode` to have the _same_ configuration during light sleep.
+ *
  * @param gpio_def The GPIO definition (contains GPIO number and configuration)
  */
 void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_t const * const gpio_def ) {
 	ESP_ERROR_CHECK( gpio_set_direction( gpio_def->num, gpio_def->mode ) );
+	ESP_ERROR_CHECK( gpio_sleep_set_direction( gpio_def->num, gpio_def->mode ) );
 	ESP_ERROR_CHECK( gpio_set_pull_mode( gpio_def->num, GPIO_FLOATING ) );
+	ESP_ERROR_CHECK( gpio_sleep_set_pull_mode( gpio_def->num, GPIO_FLOATING ) );
 	ESP_ERROR_CHECK( gpio_intr_disable( gpio_def->num ) );
 	ESP_ERROR_CHECK( gpio_set_intr_type( gpio_def->num, GPIO_INTR_DISABLE ) );
 }
@@ -47,34 +78,6 @@ void static setup_navlico_fsm_gpio_functions( void ) {
 	for ( navlico_fsm_gpio_id_t g = 0; g < GPIO_COUNT; ++g )
 		setup_navlico_fsm_gpio_function( &navlico_fsm_gpios[g] );
 	dump_navlico_fsm_io_configuration();
-}
-
-/**
- * Configures the power management for the pins
- *
- * This function calls `gpio_sleep_sel_dis` on the GPIOs.
- * Without `gpio_sleep_sel_dis`, the GPIOs would be isolated and lose the configuration
- * when the controller goes to light sleep.
- * For the output pins, the external MOSFET would slowly discharge each output pin as they are not actively driven.
- * For the input pins, the internal comparator wouldn't be power and the input pins not register any input.
- */
-void static setup_navlico_fsm_gpio_power_mgmt( void ) {
-	// See https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-disable-gpio
-	//
-	// `CONFIG_PM_SLP_DISABLE_GPIO` is set to `y` to disable all GPIOs during light sleep.
-	//
-	// you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
-	// You can also keep this feature on and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
-	ESP_LOGD( NAVLICO_FSM_TAG, "Ensure the GPIOs keep configuration in light sleep" );
-	for ( navlico_fsm_gpio_id_t g = 0; g < GPIO_COUNT; ++g )
-		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_gpios[g].num ) );
-
-	// See Datasheet Sec. 2.2
-	// Digital pins (GPIO0 ~ GPIO5, GPIO22 ~ GPIO27):
-	// are unable to work in Deep-sleep mode, but can work in Light-sleep mode
-	// only if the power domain controlled by the XPD TOP does not power off.
-	ESP_LOGD( NAVLICO_FSM_TAG, "Ensure the GPIOs remain powered in light sleep" );
-	ESP_ERROR_CHECK( esp_sleep_pd_config( ESP_PD_DOMAIN_TOP, ESP_PD_OPTION_ON ) );
 }
 
 /**
@@ -121,6 +124,5 @@ void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * const ignored_gpio,
 void setup_navlico_fsm_gpio( void ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Setting up GPIOs ..." );
 	setup_navlico_fsm_gpio_functions();
-	setup_navlico_fsm_gpio_power_mgmt();
 	ESP_LOGD( NAVLICO_FSM_TAG, "GPIOs set up" );
 }

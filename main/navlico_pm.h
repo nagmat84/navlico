@@ -15,7 +15,7 @@
  */
 void setup_power_management( void );
 
-#if CONFIG_NAVLICO_HAS_SLEEP_TIMES
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 /**
  * Logs the duration of the last sleep period.
  *

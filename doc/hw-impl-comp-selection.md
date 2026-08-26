@@ -1,6 +1,6 @@
 # Hardware Implementation — Component Selection and Dimensioning
 
-## Electical Characteristics
+## Electrical Characteristics
 
 The ESP32-H2 shows the following electrical GPIO characteristics
 (see [Espressif: ESP32-H2 — Datasheet, sec. 2.2, "Pin Overview"](https://documentation.espressif.com/esp32-h2_datasheet_en.pdf)).
@@ -48,55 +48,3 @@ _Note:_ This simplified schematics don't show any protective TVS diodes nor capa
 **TBD:** The dimensions of the omitted capacitors and the resistors must be cross-checked with the PWM frequency.
 The resistors must be sufficiently small such that they are able to charge/discharge the capacitors incl. the parasitic
 capacitance of the MOSFETs.
-
-## Temporary Breadboard Calculation
-
-This section has nothing to do with the final implementation.
-This section is only a scratch board for some temporary calculations for the development setup on the breadboard. 
-
-**Calculation for Input Pins**
-
-```
- Vcc -- R1 -- S ---+----+-- In
-                   |    |
-                  R2    C
-                   |    |
-                  GND  GND
-```
-
-_(Backward) Calculation:_
-
-- R1 + R2 = 5V/500µA = 10kΩ
-- R2 / (R1 + R2) = 3V/5V = 0.6
-- ⇒ R1 = 4kΩ, R2 = 6kΩ
-- ⇒ R1 = 4.7kΩ, R2 = mid(10kΩ, 22kΩ) = 6.9kΩ, R2' = mid(10kΩ, 22kΩ, 45kΩ) = 5.9kΩ
-
-_(Forward) Calculation:_
-
-- Rges = 4.7kΩ + 6.9kΩ = 11.6kΩ, Rges' = 4.7kΩ + 5.9kΩ = 10.6kΩ
-- Iges = 5V / 11.6kΩ = 431µA, Iges' = 5V / 10.6kΩ = 472µA
-- U(ih) = 5V × 6.9kΩ / 11.6kΩ = 2.9V, U(ih)' = 5V × 5.9kΩ / 10.6kΩ = 2.78V
-
-From https://www.mikrocontroller.net/articles/Entprellung
-
-> Ein Taster prellt üblicherweise bis zu etwa 10 ms.
-> Zur Sicherheit kann bei der Berechnung des Widerstandes eine Prellzeit von 20 ms angenommen werden.
-
-**Calculation for Output Pins**
-
-_(Backward) Calculation:_
-
-Load path (I(drain) with LED):
-
-- U(yellow) = 1.8V, U(red) = 1.6V
-- I(led) = 10mA
-- R(yellow) = (5V-1.8V)/10mA = 320Ω,  R(red) = (5V-1.6V)/10mA = 340Ω
-- ⇒ R = 330Ω
-
-Switching path (I(gate) from output pin):
-
-- I(gs) = 100nA
-- I(out,max) = 20mA
-- I(out) = 1mA
-- R(out) = 3.3V / 1mA = 3.3kΩ
-- ⇒ R = 3.3kΩ

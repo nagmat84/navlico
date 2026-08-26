@@ -1,8 +1,12 @@
 /// \file main.c
 /// Implements the Finite State Machine (FSM) handle the operational state and the associated GPIOs.
+///
+/// In order to keep this file clean and focused on the actual FSM some aspects are moved out to dedicated source files:
+/// - `navlico_fsm_gpio_defs.c`: contains the static definitions of GPIOs, buttons, indicators and lights
+/// - `navlico_fsm_gpio_setup.c`: contains the (lengthy) boilerplate code to correctly set up the GPIOs
+/// - `navlico_fsm_intr.c`: contains the interrupt-related code
 
 #include "navlico_fsm.h"
-#include "navlico_gpio_defs.h"
 #include "sdkconfig.h"
 #include <esp_attr.h>
 #include <esp_log.h>
@@ -14,198 +18,14 @@
 const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 
 /// The active operational state
-static RTC_DATA_ATTR navlico_fsm_state_t navlico_fsm_state = UNDEFINED;
+static RTC_DATA_ATTR navlico_fsm_state_t const * navlico_fsm_state = nullptr;
 
-/// The handle for the Navlico FSM Task
-static TaskHandle_t navlico_fsm_task_handle;
-
-/**
- * Configures the Input Pins
- *
- * The code relies on external pull-down resistors.
- *
- * The ESP32-H2 lacks the `RTC_PERIPH` power domain and hence does not provide the special functions `rtc_gpio_...`.
- * The ESP32-H2 supports the HOLD function but this only latches the most recently read value form the input pin into
- * an internal register and isolates the GPIO peripheral from the pin.
- * The HOLD function does not actively pull down the input pin and any noise will trigger an immediate wake-up.
- *
- * As a pre-cautionary action, this function calls `gpio_sleep_sel_dis` on the input pins.
- * Without `gpio_sleep_sel_dis` and if `CONFIG_PM_SLP_DISABLE_GPIO` was set, the GPIOs would lose their input function
- * when the controller goes to light sleep.
- */
-void static setup_navlico_fsm_input_pins( void ) {
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		gpio_dump_io_configuration( stdout, GPIO_ALL_BUTTONS_MASK );
-#endif
-
-	const gpio_config_t config = {
-		.pin_bit_mask = GPIO_ALL_BUTTONS_MASK,
-		.mode = GPIO_MODE_INPUT,
-		.pull_up_en = GPIO_PULLUP_DISABLE,
-		.pull_down_en = GPIO_PULLDOWN_DISABLE,
-		.intr_type = GPIO_INTR_DISABLE,  // only enable interrupts _after_ the ISR has been set up, keep interrupts off for now
-		.hys_ctrl_mode = GPIO_HYS_SOFT_ENABLE
-	};
-	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up input pins");
-	ESP_ERROR_CHECK( gpio_config( &config ) );
-
-	// See https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-disable-gpio
-	//
-	// `CONFIG_PM_SLP_DISABLE_GPIO` is set to `y` to disable all GPIOs during light sleep.
-	//
-	// you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
-	// You can also keep this feature on and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
-	gpio_sleep_sel_dis( GPIO_OFF_BUTTON );
-	gpio_sleep_sel_dis( GPIO_SAILING_BUTTON );
-	gpio_sleep_sel_dis( GPIO_DRIVING_BUTTON );
-	gpio_sleep_sel_dis( GPIO_ANCHORING_BUTTON );
-
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		gpio_dump_io_configuration( stdout, GPIO_ALL_BUTTONS_MASK );
-#endif
-}
-
-/**
- * Configures the Output Pins
- *
- * As a pre-cautionary action, this function calls `gpio_sleep_sel_dis` on the output pins.
- * Without `gpio_sleep_sel_dis` and if `CONFIG_PM_SLP_DISABLE_GPIO` was set, the GPIOs would be isolated when the
- * controller goes to light sleep and the external MOSFET would slowly discharge each output pin as they are not
- * actively driven.
- */
-void static setup_navlico_fsm_output_pins( void ) {
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		gpio_dump_io_configuration( stdout, GPIO_ALL_INDICATORS_MASK | GPIO_ALL_LIGHTS_MASK );
-#endif
-
-	const gpio_config_t config = {
-		.pin_bit_mask = GPIO_ALL_INDICATORS_MASK | GPIO_ALL_LIGHTS_MASK,
-		.mode = GPIO_MODE_OUTPUT,
-		.pull_up_en = GPIO_PULLUP_DISABLE,
-		.pull_down_en = GPIO_PULLDOWN_DISABLE,
-		.intr_type = GPIO_INTR_DISABLE
-	};
-	ESP_LOGI( NAVLICO_FSM_TAG, "Setting up output pins");
-	ESP_ERROR_CHECK( gpio_config( &config ) );
-
-	// See https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/kconfig-reference.html#config-pm-slp-disable-gpio
-	//
-	// `CONFIG_PM_SLP_DISABLE_GPIO` is set to `y` to disable all GPIOs during light sleep.
-	//
-	// you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
-	// You can also keep this feature on and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SAILING_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_DRIVING_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ANCHORING_INDICATOR ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_SIDE_N_STERN_LIGHT ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_MASTHEAD_LIGHT ) );
-	ESP_ERROR_CHECK( gpio_sleep_sel_dis( GPIO_ALLROUND_WHITE_LIGHT ) );
-
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		gpio_dump_io_configuration( stdout, GPIO_ALL_INDICATORS_MASK | GPIO_ALL_LIGHTS_MASK );
-#endif
-}
-
-/**
- * Enables interrupts from the GPIO peripheral
- *
- * This function enables interrupts at their source, i.e. at the GPIO peripheral.
- * The function assumes that the interrupt is already (or still) allocated and the ISR installed.
- *
- * @internal The interrupt must trigger upon a high input level, a rising edge is not sufficient.
- * During (light) sleep a rising edge is not detected and the ISR will never be called.
- * `gpio_wakeup_enable only` only accepts the two level types for a reason:
- * Light-sleep GPIO wake on the normal digital pins is level-only by design.
- * The digital edge-detect logic isn't clocked while the core is down,
- * so there's no edge detector alive to catch the transition in the first place.
- * Only a level comparator is watching, which is why `HIGH_LEVEL` works and `POSEDGE` just never fires.
- * Only the pins which sit in the LP/RTC IO domain stay powered through light sleep and keeps a real edge detector.
- * The detector latches the rising edge and holds it until the CPU is back up.
- * So the LP/RTC pins are the only place you get true edge semantics across sleep.
- * See https://www.reddit.com/r/esp32/comments/1vtfldn/comment/p51c27o/
- */
-void static enable_navlico_fsm_gpio_interrupts( void ) {
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_OFF_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DRIVING_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_ANCHORING_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_OFF_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_SAILING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_DRIVING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_enable( GPIO_ANCHORING_BUTTON ) );
-}
-
-/**
- * Disables interrupts from the GPIO peripheral
- *
- * This function disables interrupts at their source, i.e. at the GPIO peripheral.
- * The function keeps the interrupt allocation and the ISR untouched.
- *
- * @internal This function must be placed in RAM as the ISR handle_navlico_fsm_gpio_interrupt(void) calls this function
- * to temporarily disable subsequent interrupts while the first is still handled.
- * An ISR can only call code from RAM.
- */
-void static IRAM_ATTR disable_navlico_fsm_gpio_interrupts( void ) {
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_OFF_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_SAILING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_DRIVING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_intr_disable( GPIO_ANCHORING_BUTTON ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_OFF_BUTTON, GPIO_INTR_DISABLE ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_SAILING_BUTTON, GPIO_INTR_DISABLE ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_DRIVING_BUTTON, GPIO_INTR_DISABLE ) );
-	ESP_ERROR_CHECK( gpio_set_intr_type( GPIO_ANCHORING_BUTTON, GPIO_INTR_DISABLE ) );
-}
-
-/**
- * The interrupt-service routine which notifies this task upon a GPIO interrupt.
- *
- *
- *
- * @internal An ISR can only code (and data) which resides in RAM as flash access (and SPI) is potentially disabled.
- * See:
- * - https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/system/intr_alloc.html#iram-safe-interrupt-handlers
- * - https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/memory-types.html#when-to-place-code-in-iram
- * Hence, `vTaskNotifyGiveFromISR` and `vPortYieldFromISR` must be placed in IRAM, too.
- * This means `CONFIG_FREERTOS_IN_IRAM=y` must be set.
- */
-void static IRAM_ATTR handle_navlico_fsm_gpio_interrupt( void* ) {
-	disable_navlico_fsm_gpio_interrupts();
-	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	vTaskNotifyGiveFromISR( navlico_fsm_task_handle, &xHigherPriorityTaskWoken );
-	if ( xHigherPriorityTaskWoken == pdTRUE ) {
-		vPortYieldFromISR();
-	}
-}
-
-/**
- * Registers the interrupt-service routine (ISR) for GPIO
- *
- * @internal This function registers the ISR with `ESP_INTR_FLAG_IRAM` to mark it as IRAM-safe, see
- * [Espressif: ESP-IDF Programming Guide - System API - Interrupt Allocation](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/system/intr_alloc.html#iram-safe-interrupt-handlers).
- * This means that handle_navlico_fsm_gpio_interrupt(void*) and all function it calls must be placed in IRAM.
- */
-void static setup_navlico_fsm_isr( void ) {
-	ESP_LOGD( NAVLICO_FSM_TAG, "Registering interrupt-service routine ..." );
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-	esp_intr_dump( stdout );
-#endif
-	navlico_fsm_task_handle = xTaskGetCurrentTaskHandle();
-	ESP_ERROR_CHECK( gpio_install_isr_service( ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_OFF_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_SAILING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_DRIVING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_ERROR_CHECK( gpio_isr_handler_add( GPIO_ANCHORING_BUTTON, handle_navlico_fsm_gpio_interrupt, nullptr ) );
-	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine registered" );
-#if CONFIG_LOG_DEFAULT_LEVEL_VERBOSE || LOG_MAXIMUM_LEVEL_VERBOSE
-	if ( esp_log_level_get( NAVLICO_FSM_TAG ) == ESP_LOG_VERBOSE )
-		esp_intr_dump( stdout );
-#endif
-}
+// Defined in `navlicao_fsm_gpio_setup.c`
+void setup_navlico_fsm_gpio();
+void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio, bool prepare_for_deep_sleep );
+// Defined in `navlicao_fsm_intr.c`
+void setup_navlico_fsm_isr( void );
+void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio );
 
 /**
  * Reads the input pins and returns the currently or most recently pressed button.
@@ -216,38 +36,39 @@ void static setup_navlico_fsm_isr( void ) {
  *
  * @return The button which was pressed to trigger the wake-up from deep sleep
  */
-navlico_fsm_state_t static read_navlico_fsm_input_pins_after_start() {
+static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
 	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
 
 	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
 		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
 		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
-		if ( GPIO_SAILING_BUTTON_MASK & wakeup_pin_mask )
-			return SAILING;
-		if ( GPIO_DRIVING_BUTTON_MASK & wakeup_pin_mask )
-			return DRIVING;
-		if ( GPIO_ANCHORING_BUTTON_MASK & wakeup_pin_mask )
-			return ANCHORING;
+		for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
+			if ( GPIO_MASK( navlico_fsm_buttons[b].gpio->num ) & wakeup_pin_mask )
+				return &navlico_fsm_buttons[b];
+		}
 		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine GPIO which caused wake-up from deep sleep (pin mask = 0x%.16" PRIx64 ")", wakeup_pin_mask );
-		return UNDEFINED;
+		return nullptr;
 	}
 
 	ESP_LOGI( NAVLICO_FSM_TAG, "Came out of cold boot; simulating OFF button had been pressed" );
-	return OFF;
+	return &navlico_fsm_buttons[OFF_BTN];
 }
 
 /**
- * Reads the input pins and returns the currently or most recently pressed button.
+ * Reads the input pins and returns the currently pressed button.
+ *
+ * While searching for the currently pressed button, this function skips `ignored_gpio`.
  *
  * This function is called whenever the inputs should be handled:
  *  - after waking up from light sleep
  *  - during normal runtime
  *  - after the interrupt-service routine (ISR) notified this task
  *
+ * @param ignored_gpio GPIO to ignore while searching for the the pressed button
  * @return The currently or most recently pressed button.
  */
-navlico_fsm_state_t static read_navlico_fsm_input_pins() {
+static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpio_t const * ignored_gpio ) {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -261,47 +82,107 @@ navlico_fsm_state_t static read_navlico_fsm_input_pins() {
 	static constexpr useconds_t initialDebounceDelay = 20000;
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
 
-	uint_fast8_t offButtonLevel = 0;
-	uint_fast8_t sailingButtonLevel = 0;
-	uint_fast8_t drivingButtonLevel = 0;
-	uint_fast8_t anchoringButtonLevel = 0;
+	uint_fast8_t btn_levels[ BTN_COUNT ];
+	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b )
+		btn_levels[b] = 0;
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
 	// Repeated readings to debounce
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
-		offButtonLevel += gpio_get_level( GPIO_OFF_BUTTON );
-		sailingButtonLevel += gpio_get_level( GPIO_SAILING_BUTTON );
-		drivingButtonLevel += gpio_get_level( GPIO_DRIVING_BUTTON );
-		anchoringButtonLevel += gpio_get_level( GPIO_ANCHORING_BUTTON );
+		for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
+			navlico_fsm_gpio_t const * gpio = navlico_fsm_buttons[b].gpio;
+			if ( gpio == ignored_gpio ) continue;
+			btn_levels[b] +=
+				gpio_get_level( gpio->num ) == gpio->active_level;
+		}
 		usleep( inbetweenDebounceDelay );
 	}
-	ESP_LOGD( NAVLICO_FSM_TAG,
-	          "Input pins have been read "
-	          "(offButtonLevel = %" PRIuFAST8 ", sailingButtonLevel = %" PRIuFAST8
-	          ", drivingButtonLevel = %" PRIuFAST8 ", anchoringButtonLevel = %" PRIuFAST8 ")",
-	          offButtonLevel, sailingButtonLevel, drivingButtonLevel, anchoringButtonLevel );
-	if ( offButtonLevel > debounceProbes / 2 )
-		return OFF;
-	if ( sailingButtonLevel > debounceProbes / 2 )
-		return SAILING;
-	if ( drivingButtonLevel > debounceProbes / 2 )
-		return DRIVING;
-	if ( anchoringButtonLevel > debounceProbes / 2 )
-		return ANCHORING;
+#ifdef CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
+	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[b].gpio;
+		ESP_LOGD(
+			NAVLICO_FSM_TAG,
+			"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
+			gpio->num,
+			b,
+			navlico_fsm_buttons[b].label,
+			btn_levels[b],
+			btn_levels[b] > debounceProbes / 2 ? 'x' : ' ',
+			gpio == ignored_gpio ? 'x' : ' '
+		);
+	}
+#endif
+	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
+		// We take the first button for which more than half of the probes indicated an active GPIO
+		if ( btn_levels[b] > debounceProbes / 2 )
+			return &navlico_fsm_buttons[b];
+	}
 	ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
-	return UNDEFINED;
+	return nullptr;
 }
 
 /**
- * Waits until all input pins have become idle
+ * Checks whether any of the button inputs but the ignored one is active
+ *
+ * @param ignored_gpio The GPIO which shall be ignored when determining whether any button is active
+ * @return True, if any of the button inputs is active; false otherwise
  */
-void static wait_for_navlico_fsm_idle_input( void ) {
-	while ( gpio_get_level( GPIO_OFF_BUTTON ) == 1 ||
-	        gpio_get_level( GPIO_SAILING_BUTTON ) == 1 ||
-	        gpio_get_level( GPIO_DRIVING_BUTTON ) == 1 ||
-	        gpio_get_level( GPIO_ANCHORING_BUTTON ) == 1 ) {
+bool static has_navlico_fsm_active_input( navlico_fsm_gpio_t const * ignored_gpio ) {
+	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		if ( navlico_fsm_buttons[btn].gpio == ignored_gpio ) continue;
+		if ( gpio_get_level( navlico_fsm_buttons[btn].gpio->num ) == navlico_fsm_buttons[btn].gpio->active_level )
+			return true;
+	}
+	return false;
+}
+
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+void static dump_navlico_fsm_input_state( navlico_fsm_gpio_t const * ignored_gpio ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... " );
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
+	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
+		int const level = gpio_get_level( gpio->num );
+		ESP_LOGD(
+			NAVLICO_FSM_TAG,
+			"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
+			gpio->num,
+			btn,
+			navlico_fsm_buttons[btn].label,
+			level,
+			level == gpio->active_level ? 'x' : ' ',
+			gpio == ignored_gpio ? 'x' : ' '
+		);
+	}
+	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... finished" );
+}
+#endif
+
+/**
+ * Waits until all input pins but the ignored one have become idle
+ *
+ * @param ignored_gpio The GPIO which shall be ignored when waiting for all pins to become idle
+ */
+void static wait_for_navlico_fsm_idle_input( navlico_fsm_gpio_t const * ignored_gpio ) {
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+	unsigned int counter = 0;
+	while ( has_navlico_fsm_active_input( ignored_gpio ) ) {
+		vTaskDelay( pdMS_TO_TICKS( 10 ) );
+		if ( counter % 200 == 0 ) {
+			dump_navlico_fsm_input_state( ignored_gpio );
+			counter = 1;
+		} else {
+			counter++;
+		}
+	}
+#else
+	while ( has_navlico_fsm_active_input( ignored_gpio ) ) {
 		vTaskDelay( pdMS_TO_TICKS( 10 ) );
 	}
+#endif
 }
 
 /**
@@ -309,80 +190,69 @@ void static wait_for_navlico_fsm_idle_input( void ) {
  *
  * This function uses the currently stored operational state in #operational_state to set the output pins.
  */
-void static write_navlico_fsm_output_pins( navlico_fsm_state_t const state ) {
-	switch ( state ) {
-		case UNDEFINED:
-			// TODO: We should do something else here and conspicuously indicate this error condition instead of just pretending to be in the "OFF" state.
-		case OFF:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: OFF" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 0 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 0 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 0 );
-			break;
-		case SAILING:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: SAILING" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 1 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 1 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 0 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 0 );
-			break;
-		case DRIVING:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: DRIVING" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 1 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 0 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 1 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 1 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 0 );
-			break;
-		case ANCHORING:
-			ESP_LOGI( NAVLICO_FSM_TAG, "New navigation light state: ANCHORING" );
-			gpio_set_level( GPIO_SAILING_INDICATOR, 0 );
-			gpio_set_level( GPIO_DRIVING_INDICATOR, 0 );
-			gpio_set_level( GPIO_ANCHORING_INDICATOR, 1 );
-			gpio_set_level(GPIO_SIDE_N_STERN_LIGHT, 0 );
-			gpio_set_level(GPIO_MASTHEAD_LIGHT, 0 );
-			gpio_set_level(GPIO_ALLROUND_WHITE_LIGHT, 1 );
-			break;
+void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const state ) {
+	// TODO: We should do something else here and conspicuously indicate this error condition instead of just doing nothing
+	if ( state == nullptr )
+		return;
+
+	ESP_LOGI( NAVLICO_FSM_TAG, "Writing output pins" );
+	navlico_fsm_gpio_t const * const indicator_gpio = state->indicator ? state->indicator->gpio : nullptr;
+	navlico_fsm_gpio_t const * const light_0_gpio = state->lights[0] ? state->lights[0]->gpio : nullptr;
+	navlico_fsm_gpio_t const * const light_1_gpio = state->lights[1] ? state->lights[1]->gpio : nullptr;
+
+	// Deactivate all indicator and lights but skip those who might be re-enabled anyway to avoid flicker
+	for ( navlico_fsm_indicator_id_t i = 0; i < IND_COUNT; ++i ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_indicators[i].gpio;
+		if ( gpio == indicator_gpio ) continue;
+		ESP_ERROR_CHECK( gpio_set_level( gpio->num, 1 - gpio->active_level ) );
+	}
+	for ( navlico_fsm_light_id_t l = 0; l < LIGHT_COUNT; ++l ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_lights[l].gpio;
+		if ( gpio == light_0_gpio || gpio == light_1_gpio ) continue;
+		ESP_ERROR_CHECK( gpio_set_level( gpio->num, 1 - gpio->active_level ) );
+	}
+
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+	uint64_t const mask =
+		( indicator_gpio ? GPIO_MASK( indicator_gpio->num ) : 0ULL ) |
+		( light_0_gpio ? GPIO_MASK( light_0_gpio->num ) : 0ULL ) |
+		( light_1_gpio ? GPIO_MASK( light_1_gpio->num ) : 0ULL );
+	esp_log_level_t const level = esp_log_level_get( NAVLICO_FSM_TAG );
+	if ( level == ESP_LOG_DEBUG || level == ESP_LOG_VERBOSE )
+		gpio_dump_io_configuration( stdout, mask );
+#endif
+
+	// Enable indicator and up to two lights
+	if ( indicator_gpio ) {
+		ESP_LOGD(
+			NAVLICO_FSM_TAG, "Setting indictor %d (\"%s\") on GPIO %d to level %d",
+			state->indicator->id, state->indicator->label, indicator_gpio->num, indicator_gpio->active_level
+		);
+		ESP_ERROR_CHECK( gpio_set_level( indicator_gpio->num, indicator_gpio->active_level ) );
+	}
+	if ( light_0_gpio ) {
+		ESP_LOGD(
+			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d to level %d",
+			state->lights[0]->id, state->lights[0]->label, light_0_gpio->num, light_0_gpio->active_level
+		);
+		ESP_ERROR_CHECK( gpio_set_level( light_0_gpio->num, light_0_gpio->active_level ) );
+	}
+	if ( light_1_gpio ) {
+		ESP_LOGD(
+			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d to level %d",
+			state->lights[1]->id, state->lights[1]->label, light_1_gpio->num, light_1_gpio->active_level
+		);
+		ESP_ERROR_CHECK( gpio_set_level( light_1_gpio->num, light_1_gpio->active_level ) );
 	}
 }
 
 /**
- * Configures necessary wake-up sources.
- */
-void static setup_navlico_fsm_wakeup_sources( void ) {
-	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up on input pins for buttons" );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_OFF_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_SAILING_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_DRIVING_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( gpio_wakeup_enable( GPIO_ANCHORING_BUTTON, GPIO_INTR_HIGH_LEVEL ) );
-	ESP_ERROR_CHECK( esp_sleep_enable_gpio_wakeup() );
-	ESP_LOGD( NAVLICO_FSM_TAG, "Ensure the GPIO outputs remain powered in light sleep" );
-	// See Datasheet Sec. 2.2
-	// Digital pins (GPIO0 ~ GPIO5, GPIO22 ~ GPIO27):
-	// are unable to work in Deep-sleep mode, but can work in Light-sleep mode
-	// only if the power domain controlled by the XPD TOP does not power off.
-	ESP_ERROR_CHECK( esp_sleep_pd_config( ESP_PD_DOMAIN_TOP, ESP_PD_OPTION_ON ) );
-	ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up on input pins for buttons" );
-	ESP_ERROR_CHECK( esp_sleep_enable_ext1_wakeup_io( GPIO_WAKEUP_BUTTONS_MASK, ESP_EXT1_WAKEUP_ANY_HIGH ) );
-}
-
-/**
- * Returns the current operational state of the FSM:
+ * Returns whether the FSM is ready for deep sleep
  *
- * The returned operational state equals `UNDEFINED` if
- * - the task has never read the inputs and set the state (initial state), or
- * - the task is currently in the middle of updating the state, but has not yet reached a consistent state again (transitional state)
- *
- * @return The current operational state of the FSM.
+ * @return True if the FSM is ready for deep sleep
  */
-navlico_fsm_state_t get_navlico_fsm_state( void ) {
-	return navlico_fsm_state;
+bool is_navlico_fsm_deep_sleep_ready( void ) {
+	return navlico_fsm_state == &navlico_fsm_states[OFF_STATE];
 }
 
 /**
@@ -399,13 +269,16 @@ navlico_fsm_state_t get_navlico_fsm_state( void ) {
  * level won't give the desired result.
  * If `false`, the function calls read_navlico_fsm_input_pins(void) which reads the current level of the input pins.
  */
-void update_navlico_fsm_state( bool firstRun ) {
-	navlico_fsm_state = UNDEFINED;
-	navlico_fsm_state_t const new_state = firstRun ?
+void static update_navlico_fsm_state( bool const firstRun ) {
+	navlico_fsm_state_t const * const prev_state = navlico_fsm_state;
+	navlico_fsm_state = nullptr;
+	navlico_fsm_button_t const * const button = firstRun ?
 		read_navlico_fsm_input_pins_after_start() :
-		read_navlico_fsm_input_pins();
+		read_navlico_fsm_input_pins( prev_state ? prev_state->button->gpio : nullptr );
+	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
 	write_navlico_fsm_output_pins( new_state );
-	wait_for_navlico_fsm_idle_input();
+	ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );
+	wait_for_navlico_fsm_idle_input( new_state->button->gpio );
 	navlico_fsm_state = new_state;
 }
 
@@ -416,9 +289,7 @@ void update_navlico_fsm_state( bool firstRun ) {
  * This function never returns and is supposed to be called via `xTaskCreate`.
  */
 void navlico_fsm_task( void* ) {
-	setup_navlico_fsm_input_pins();
-	setup_navlico_fsm_output_pins();
-	setup_navlico_fsm_wakeup_sources();
+	setup_navlico_fsm_gpio();
 	setup_navlico_fsm_isr();
 
 	// Update (initialize) state after boot (either cold boot or wake-up from deep sleep)
@@ -426,10 +297,17 @@ void navlico_fsm_task( void* ) {
 
 	// ReSharper disable once CppDFAEndlessLoop
 	while ( true ) {
+		// Some buttons and navigational lights share a combined input/output line as peers.
+		// When the FSM is in a state which drives such a GPIO,
+		// then that GPIO must not be ignored as a wake-up and interrupt source
+		// as the wake-up source or interrupt would immediately trigger.
+		navlico_fsm_gpio_t const * const ignored_gpio = navlico_fsm_state ? navlico_fsm_state->button->gpio : nullptr;
 		// We have to (re-)enable the interrupts each time as the ISR disables the interrupts
 		// before it notifies the task to avoid interim interrupts piling up
 		// while the first interrupt is still being handled.
-		enable_navlico_fsm_gpio_interrupts();
+		enable_navlico_fsm_gpio_interrupts( ignored_gpio );
+		// The wake-up source are not disabled, but we must (re-)set them as the ignored button may have changed.
+		set_navlico_fsm_gpio_wakeup( ignored_gpio, is_navlico_fsm_deep_sleep_ready() );
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		update_navlico_fsm_state( false );
 	}

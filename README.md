@@ -14,6 +14,7 @@ Navlico (short for “Navigation Light Control”) is a small, embedded program 
    2. Hardware Implementation
       1. [Hardware Implementation — Pin Assignment and GPIOs](doc/hw-impl-pin-assignment.md)
       2. [Hardware Implementation — Component Selection and Dimensioning](doc/hw-impl-comp-selection.md)
+      3. [Hardware Implementation — Breadboard Test Setup](doc/hw-impl-breadboard.md)
    3. Software Implementation
       1. [Software Implementation — Power Management for Low Power Consumption](doc/sw-impl-pwr-mgmt.md) 
 

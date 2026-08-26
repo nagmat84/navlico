@@ -72,9 +72,21 @@ menu "Navlico Configuration"
         prompt "Threshold for the expected sleep duration which will trigger a deep sleep instead of a light sleep"
         default 5000
 
+    choice NAVLICO_VARIANT
+        prompt "Variant"
+        default NAVLICO_VARIANT_REDUCED
+        config NAVLICO_VARIANT_REDUCED
+            bool "Reduced"
+        config NAVLICO_VARIANT_FULL_FLEDGED
+            bool "Full-fledged"
+        help
+            The implemented variant:
+            Reduced supports buttons and lights for the four operational states "OFF", "SAILING", "DRIVING" and "ANCHORING".
+            Full-fledged additionally supports buttons and lights for the two extra operational state "SAILING COAST" and "DISABLED".
+    endchoice
 endmenu
 
-config NAVLICO_HAS_SLEEP_TIMES
+config NAVLICO_HAS_VERBOSE_OUTPUT
     bool
     default y if LOG_MAXIMUM_LEVEL_DEBUG || LOG_DEFAULT_LEVEL_DEBUG || LOG_MAXIMUM_LEVEL_VERBOSE || LOG_DEFAULT_LEVEL_VERBOSE
     depends on LOG_MAXIMUM_LEVEL_DEBUG || LOG_DEFAULT_LEVEL_DEBUG || LOG_MAXIMUM_LEVEL_VERBOSE || LOG_DEFAULT_LEVEL_VERBOSE

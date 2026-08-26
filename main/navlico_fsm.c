@@ -14,6 +14,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <unistd.h>
+#include <driver/rtc_io.h>
 
 const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 
@@ -22,7 +23,8 @@ static RTC_DATA_ATTR navlico_fsm_state_t const * navlico_fsm_state = nullptr;
 
 // Defined in `navlicao_fsm_gpio_setup.c`
 void setup_navlico_fsm_gpio();
-void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio );
+void enable_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio );
+void disable_navlico_fsm_gpio_wakeup();
 // Defined in `navlicao_fsm_intr.c`
 void setup_navlico_fsm_isr( void );
 void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio );
@@ -204,28 +206,56 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 	if ( state == nullptr )
 		return;
 
-	if ( state->indicator != nullptr ) {
+#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
+	uint64_t const mask =
+		( state->indicator ? GPIO_MASK( state->indicator->gpio->num ) : 0ULL ) |
+		( state->lights[0] ? GPIO_MASK( state->lights[0]->gpio->num ) : 0ULL ) |
+		( state->lights[1] ? GPIO_MASK( state->lights[1]->gpio->num ) : 0ULL );
+	esp_log_level_t const level = esp_log_level_get( NAVLICO_FSM_TAG );
+	if ( level == ESP_LOG_DEBUG || level == ESP_LOG_VERBOSE )
+		gpio_dump_io_configuration( stdout, mask );
+#endif
+
+	if ( state->indicator ) {
 		navlico_fsm_gpio_t const * const gpio = state->indicator->gpio;
 		ESP_LOGD(
 			NAVLICO_FSM_TAG, "Setting indictor %d (\"%s\") on GPIO %d (\"%s\") to level %d",
 			state->indicator->tag, state->indicator->label, gpio->num, gpio->label, gpio->active_level
 		);
+		if ( rtc_gpio_is_valid_gpio( gpio->num ) ) {
+			ESP_ERROR_CHECK( rtc_gpio_hold_dis( gpio->num ) );
+			ESP_ERROR_CHECK( rtc_gpio_deinit( gpio->num ) );
+		}
+		gpio_hold_dis( gpio->num );
+		gpio_set_direction( gpio->num, gpio->mode );
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
 	}
-	if ( state->lights[0] != nullptr ) {
+	if ( state->lights[0] ) {
 		navlico_fsm_gpio_t const * const gpio = state->lights[0]->gpio;
 		ESP_LOGD(
 			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d (\"%s\") to level %d",
 			state->lights[0]->tag, state->lights[0]->label, gpio->num, gpio->label, gpio->active_level
 		);
+		if ( rtc_gpio_is_valid_gpio( gpio->num ) ) {
+			ESP_ERROR_CHECK( rtc_gpio_hold_dis( gpio->num ) );
+			ESP_ERROR_CHECK( rtc_gpio_deinit( gpio->num ) );
+		}
+		gpio_hold_dis( gpio->num );
+		gpio_set_direction( gpio->num, gpio->mode );
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
 	}
-	if ( state->lights[1] != nullptr ) {
+	if ( state->lights[1] ) {
 		navlico_fsm_gpio_t const * const gpio = state->lights[1]->gpio;
 		ESP_LOGD(
 			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d (\"%s\") to level %d",
 			state->lights[1]->tag, state->lights[1]->label, gpio->num, gpio->label, gpio->active_level
 		);
+		if ( rtc_gpio_is_valid_gpio( gpio->num ) ) {
+			ESP_ERROR_CHECK( rtc_gpio_hold_dis( gpio->num ) );
+			ESP_ERROR_CHECK( rtc_gpio_deinit( gpio->num ) );
+		}
+		gpio_hold_dis( gpio->num );
+		gpio_set_direction( gpio->num, gpio->mode );
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
 	}
 }
@@ -291,8 +321,9 @@ void navlico_fsm_task( void* ) {
 		// while the first interrupt is still being handled.
 		enable_navlico_fsm_gpio_interrupts( ignored_gpio );
 		// The wake-up source are not disabled, but we must (re-)set them as the ignored button may have changed.
-		set_navlico_fsm_gpio_wakeup( ignored_gpio );
+		enable_navlico_fsm_gpio_wakeup( ignored_gpio );
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
+		disable_navlico_fsm_gpio_wakeup();
 		update_navlico_fsm_state( false );
 	}
 }

@@ -18,7 +18,7 @@ extern const char NAVLICO_FSM_TAG[];
  *
  * @internal The ordering of the enum must be kept in sync with the definition of the array navlico_fsm_states
  */
-typedef enum navlico_fsm_state_tag_t : uint_fast8_t {
+typedef enum navlico_fsm_state_id_t : uint_fast8_t {
 	OFF_STATE,           ///< The user has pressed the OFF button, the operational state is OFF
 	SAILING_STATE,       ///< The user has pressed the SAILING button, the operational state is SAILING
 	DRIVING_STATE,       ///< The user has pressed the DRIVING button, the operational state is DRIVING
@@ -28,9 +28,9 @@ typedef enum navlico_fsm_state_tag_t : uint_fast8_t {
 	DISABLED_STATE,      ///< The user has pressed the DISABLED button, the operational state is DISABLED
 #endif
 	STATE_COUNT
-} navlico_fsm_state_tag_t;
+} navlico_fsm_state_id_t;
 
-typedef enum navlico_fsm_gpio_tag_t : uint_fast8_t {
+typedef enum navlico_fsm_gpio_id_t : uint_fast8_t {
 	GPIO_0,
 	GPIO_1,
 	GPIO_2,
@@ -49,7 +49,7 @@ typedef enum navlico_fsm_gpio_tag_t : uint_fast8_t {
 	GPIO_25,
 #endif
 	GPIO_COUNT
-} navlico_fsm_gpio_tag_t;
+} navlico_fsm_gpio_id_t;
 
 /**
  * The buttons
@@ -58,7 +58,7 @@ typedef enum navlico_fsm_gpio_tag_t : uint_fast8_t {
  *
  * @internal The ordering of the enum must be kept in sync with the definition of the array navlico_fsm_buttons.
  */
-typedef enum navlico_fsm_button_tag_t : uint_fast8_t {
+typedef enum navlico_fsm_button_id_t : uint_fast8_t {
 	OFF_BTN,
 	SAILING_BTN,
 	DRIVING_BTN,
@@ -68,7 +68,7 @@ typedef enum navlico_fsm_button_tag_t : uint_fast8_t {
 	DISABLED_BTN,
 #endif
 	BTN_COUNT
-} navlico_fsm_button_tag_t;
+} navlico_fsm_button_id_t;
 
 /**
  * The indicator lights
@@ -78,7 +78,7 @@ typedef enum navlico_fsm_button_tag_t : uint_fast8_t {
  *
  * @internal The ordering of the enum must be kept in sync with the definition of the array navlico_fsm_indicators.
  */
-typedef enum navlico_fsm_indicator_tag_t : uint_fast8_t {
+typedef enum navlico_fsm_indicator_id_t : uint_fast8_t {
 	SAILING_IND,
 	DRIVING_IND,
 	ANCHORING_IND,
@@ -87,7 +87,7 @@ typedef enum navlico_fsm_indicator_tag_t : uint_fast8_t {
 	DISABLED_IND,
 #endif
 	IND_COUNT
-} navlico_fsm_indicator_tag_t;
+} navlico_fsm_indicator_id_t;
 
 /**
  * The navigational lights
@@ -96,7 +96,7 @@ typedef enum navlico_fsm_indicator_tag_t : uint_fast8_t {
  *
  * @internal The ordering of the enum must be kept in sync with the definition of the array navlico_fsm_lights.
  */
-typedef enum navlico_fsm_light_tag_t : uint_fast8_t {
+typedef enum navlico_fsm_light_id_t : uint_fast8_t {
 	SIDE_N_STERN_LIGHT,
 	MASTHEAD_LIGHT,
 	ALLROUND_WHITE_LIGHT,
@@ -106,7 +106,7 @@ typedef enum navlico_fsm_light_tag_t : uint_fast8_t {
 	ALLROUND_RED_2_LIGHT,
 #endif
 	LIGHT_COUNT
-} navlico_fsm_light_tag_t;
+} navlico_fsm_light_id_t;
 
 typedef struct navlico_fsm_gpio_t navlico_fsm_gpio_t;
 typedef struct navlico_fsm_button_t navlico_fsm_button_t;
@@ -118,14 +118,13 @@ typedef struct navlico_fsm_state_t navlico_fsm_state_t;
  * Defines the configuration of a single GPIO
  *
  * A GPIO is defined by its
- * - tag
+ * - id
  * - (pin) number
  * - mode
  * - whether it is active-high or active-low
  */
 struct navlico_fsm_gpio_t {
-	navlico_fsm_gpio_tag_t tag; ///< The tag of the GPIO definition
-	char const * const label; ///< A printable name
+	navlico_fsm_gpio_id_t id; ///< The id of the GPIO definition
 	gpio_num_t num; ///< The number of GPIO
 	gpio_mode_t mode; ///< The operational mode of the GPIO: either `GPIO_MODE_INPUT`, `GPIO_MODE_INPUT_OUTPUT_OD`, `GPIO_MODE_OUTPUT` or `GPIO_MODE_OUTPUT_OD`.
 	uint32_t active_level; ///< Determines whether the pin is active high or active low: 1 = active high, 0 = active low
@@ -140,7 +139,7 @@ struct navlico_fsm_gpio_t {
  *   with a navigational light.
  */
 struct navlico_fsm_button_t {
-	navlico_fsm_button_tag_t tag; ///< The tag of the button definition
+	navlico_fsm_button_id_t id; ///< The id of the button definition
 	char const * const label; ///< A printable name
 	navlico_fsm_gpio_t const * gpio; ///< The associated GPIO configuration
 	navlico_fsm_state_t const * state; ///< The state which this button triggers
@@ -154,7 +153,7 @@ struct navlico_fsm_button_t {
  * - has mode `GPIO_MODE_OUTPUT` (i.e. push-pull mode) due to optional PWM dimming
  */
 struct navlico_fsm_indicator_t {
-	navlico_fsm_indicator_tag_t tag; ///< The tag of the indicator definition
+	navlico_fsm_indicator_id_t id; ///< The id of the indicator definition
 	char const * const label; ///< A printable name
 	navlico_fsm_gpio_t const * gpio; ///< The associated GPIO configuration
 	navlico_fsm_state_t const * state; ///< The state which this indicator signals
@@ -169,7 +168,7 @@ struct navlico_fsm_indicator_t {
  *   a signal line with a button.
  */
 struct navlico_fsm_light_t {
-	navlico_fsm_light_tag_t tag; ///< The tag of the light definition
+	navlico_fsm_light_id_t id; ///< The id of the light definition
 	char const * const label; ///< A printable name
 	navlico_fsm_gpio_t const * gpio; ///< The associated GPIO configuration
 };
@@ -183,7 +182,7 @@ struct navlico_fsm_light_t {
  * - a set of navigational lights which are active.
  */
 struct navlico_fsm_state_t {
-	navlico_fsm_state_tag_t tag; ///< The tag of the state definition
+	navlico_fsm_state_id_t id; ///< The id of the state definition
 	char const * const label; ///< A printable name
 	navlico_fsm_button_t const * button; ///< The button which triggered the state
 	navlico_fsm_indicator_t const * indicator; ///< The indicator which signals the state

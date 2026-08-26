@@ -36,7 +36,7 @@ static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
  * @param ignored_gpio The GPIO which shall not be enabled as a wake-up source
  */
 void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * const ignored_gpio ) {
-	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 		if ( gpio == ignored_gpio ) continue;
 		ESP_ERROR_CHECK( gpio_set_intr_type(
@@ -57,7 +57,7 @@ void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * const ignore
  * An ISR can only call code from RAM.
  */
 void static IRAM_ATTR disable_navlico_fsm_gpio_interrupts( void ) {
-	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 		ESP_ERROR_CHECK( gpio_intr_disable( gpio->num ) );
 		ESP_ERROR_CHECK( gpio_set_intr_type( gpio->num, GPIO_INTR_DISABLE ) );
@@ -104,7 +104,7 @@ void setup_navlico_fsm_isr( void ) {
 	dump_navlico_fsm_isr_config();
 	navlico_fsm_task_handle = xTaskGetCurrentTaskHandle();
 	ESP_ERROR_CHECK( gpio_install_isr_service( ESP_INTR_FLAG_SHARED | ESP_INTR_FLAG_IRAM ) );
-	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 		ESP_ERROR_CHECK( gpio_isr_handler_add(
 			gpio->num, handle_navlico_fsm_gpio_interrupt, nullptr

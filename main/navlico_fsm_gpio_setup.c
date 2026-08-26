@@ -10,7 +10,7 @@
 void static dump_navlico_fsm_io_configuration( void ) {
 	static uint64_t mask = 0ULL;
 	if ( mask == 0ULL ) {
-		for ( navlico_fsm_gpio_tag_t g = 0; g < GPIO_COUNT; ++g )
+		for ( navlico_fsm_gpio_id_t g = 0; g < GPIO_COUNT; ++g )
 			mask |= GPIO_MASK( navlico_fsm_gpios[g].num );
 	}
 	esp_log_level_t const level = esp_log_level_get( NAVLICO_FSM_TAG );
@@ -44,7 +44,7 @@ void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_t const * const gp
  */
 void static setup_navlico_fsm_gpio_functions( void ) {
 	dump_navlico_fsm_io_configuration();
-	for ( navlico_fsm_gpio_tag_t g = 0; g < GPIO_COUNT; ++g )
+	for ( navlico_fsm_gpio_id_t g = 0; g < GPIO_COUNT; ++g )
 		setup_navlico_fsm_gpio_function( &navlico_fsm_gpios[g] );
 	dump_navlico_fsm_io_configuration();
 }
@@ -66,7 +66,7 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
 	// you can call 'gpio_sleep_sel_dis' to disable this feature on those pins.
 	// You can also keep this feature on and call 'gpio_sleep_set_direction' and 'gpio_sleep_set_pull_mode'
 	ESP_LOGD( NAVLICO_FSM_TAG, "Ensure the GPIOs keep configuration in light sleep" );
-	for ( navlico_fsm_gpio_tag_t g = 0; g < GPIO_COUNT; ++g )
+	for ( navlico_fsm_gpio_id_t g = 0; g < GPIO_COUNT; ++g )
 		ESP_ERROR_CHECK( gpio_sleep_sel_dis( navlico_fsm_gpios[g].num ) );
 
 	// See Datasheet Sec. 2.2
@@ -90,7 +90,7 @@ void static setup_navlico_fsm_gpio_power_mgmt( void ) {
 void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * const ignored_gpio, bool const prepare_for_deep_sleep ) {
 	if ( prepare_for_deep_sleep ) {
 		ESP_LOGD( NAVLICO_FSM_TAG, "Enabling EXT1 wake-up" );
-		for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 			navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 			if ( !esp_sleep_is_valid_wakeup_gpio( gpio->num ) ) continue;
 			if ( gpio == ignored_gpio ) {
@@ -103,7 +103,7 @@ void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * const ignored_gpio,
 		}
 	} else {
 		ESP_LOGD( NAVLICO_FSM_TAG, "Enabling GPIO wake-up" );
-		for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+		for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 			navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 			if ( gpio == ignored_gpio ) {
 				gpio_wakeup_disable( gpio->num );

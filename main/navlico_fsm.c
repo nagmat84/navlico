@@ -44,7 +44,7 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
 	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
 		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
 		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
-		for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+		for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
 			if ( GPIO_MASK( navlico_fsm_buttons[b].gpio->num ) & wakeup_pin_mask )
 				return &navlico_fsm_buttons[b];
 		}
@@ -84,13 +84,13 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpi
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
 
 	uint_fast8_t btn_levels[ BTN_COUNT ];
-	for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b )
+	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b )
 		btn_levels[b] = 0;
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
 	// Repeated readings to debounce
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
-		for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+		for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
 			navlico_fsm_gpio_t const * gpio = navlico_fsm_buttons[b].gpio;
 			if ( gpio == ignored_gpio ) continue;
 			btn_levels[b] +=
@@ -99,15 +99,14 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpi
 		usleep( inbetweenDebounceDelay );
 	}
 #ifdef CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
-	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ GPIO Label │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
-	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼────────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
-	for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
+	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[b].gpio;
 		ESP_LOGD(
 			NAVLICO_FSM_TAG,
-			"│ %6.1d │ %-10.10s │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
+			"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
 			gpio->num,
-			gpio->label,
 			b,
 			navlico_fsm_buttons[b].label,
 			btn_levels[b],
@@ -116,7 +115,7 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpi
 		);
 	}
 #endif
-	for ( navlico_fsm_button_tag_t b = 0; b < BTN_COUNT; ++b ) {
+	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
 		// We take the first button for which more than half of the probes indicated an active GPIO
 		if ( btn_levels[b] > debounceProbes / 2 )
 			return &navlico_fsm_buttons[b];
@@ -132,7 +131,7 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpi
  * @return True, if any of the button inputs is active; false otherwise
  */
 bool static has_navlico_fsm_active_input( navlico_fsm_gpio_t const * ignored_gpio ) {
-	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 		if ( navlico_fsm_buttons[btn].gpio == ignored_gpio ) continue;
 		if ( gpio_get_level( navlico_fsm_buttons[btn].gpio->num ) == navlico_fsm_buttons[btn].gpio->active_level )
 			return true;
@@ -143,16 +142,15 @@ bool static has_navlico_fsm_active_input( navlico_fsm_gpio_t const * ignored_gpi
 #if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 void static dump_navlico_fsm_input_state( navlico_fsm_gpio_t const * ignored_gpio ) {
 	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... " );
-	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ GPIO Label │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
-	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼────────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
-	for ( navlico_fsm_button_tag_t btn = 0; btn < BTN_COUNT; ++btn ) {
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
+	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 		int const level = gpio_get_level( gpio->num );
 		ESP_LOGD(
 			NAVLICO_FSM_TAG,
-			"│ %6.1d │ %-10.10s │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
+			"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
 			gpio->num,
-			gpio->label,
 			btn,
 			navlico_fsm_buttons[btn].label,
 			level,
@@ -204,12 +202,12 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 	navlico_fsm_gpio_t const * const light_1_gpio = state->lights[1] ? state->lights[1]->gpio : nullptr;
 
 	// Deactivate all indicator and lights but those who might be re-enabled anyway to avoid flicker
-	for ( navlico_fsm_indicator_tag_t i = 0; i < IND_COUNT; ++i ) {
+	for ( navlico_fsm_indicator_id_t i = 0; i < IND_COUNT; ++i ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_indicators[i].gpio;
 		if ( gpio == indicator_gpio ) continue;
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, 1 - gpio->active_level ) );
 	}
-	for ( navlico_fsm_light_tag_t l = 0; l < LIGHT_COUNT; ++l ) {
+	for ( navlico_fsm_light_id_t l = 0; l < LIGHT_COUNT; ++l ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_lights[l].gpio;
 		if ( gpio == light_0_gpio || gpio == light_1_gpio ) continue;
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, 1 - gpio->active_level ) );
@@ -228,22 +226,22 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 	// Enable indicator and up to two lights
 	if ( indicator_gpio ) {
 		ESP_LOGD(
-			NAVLICO_FSM_TAG, "Setting indictor %d (\"%s\") on GPIO %d (\"%s\") to level %d",
-			state->indicator->tag, state->indicator->label, indicator_gpio->num, indicator_gpio->label, indicator_gpio->active_level
+			NAVLICO_FSM_TAG, "Setting indictor %d (\"%s\") on GPIO %d to level %d",
+			state->indicator->id, state->indicator->label, indicator_gpio->num, indicator_gpio->active_level
 		);
 		ESP_ERROR_CHECK( gpio_set_level( indicator_gpio->num, indicator_gpio->active_level ) );
 	}
 	if ( light_0_gpio ) {
 		ESP_LOGD(
-			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d (\"%s\") to level %d",
-			state->lights[0]->tag, state->lights[0]->label, light_0_gpio->num, light_0_gpio->label, light_0_gpio->active_level
+			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d to level %d",
+			state->lights[0]->id, state->lights[0]->label, light_0_gpio->num, light_0_gpio->active_level
 		);
 		ESP_ERROR_CHECK( gpio_set_level( light_0_gpio->num, light_0_gpio->active_level ) );
 	}
 	if ( light_1_gpio ) {
 		ESP_LOGD(
-			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d (\"%s\") to level %d",
-			state->lights[1]->tag, state->lights[1]->label, light_1_gpio->num, light_1_gpio->label, light_1_gpio->active_level
+			NAVLICO_FSM_TAG, "Setting light %d (\"%s\") on GPIO %d to level %d",
+			state->lights[1]->id, state->lights[1]->label, light_1_gpio->num, light_1_gpio->active_level
 		);
 		ESP_ERROR_CHECK( gpio_set_level( light_1_gpio->num, light_1_gpio->active_level ) );
 	}

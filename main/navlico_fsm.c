@@ -23,7 +23,7 @@ static RTC_DATA_ATTR navlico_fsm_state_t const * navlico_fsm_state = nullptr;
 
 // Defined in `navlicao_fsm_gpio_setup.c`
 void setup_navlico_fsm_gpio();
-void enable_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio );
+void enable_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio, bool prepare_for_deep_sleep );
 void disable_navlico_fsm_gpio_wakeup();
 // Defined in `navlicao_fsm_intr.c`
 void setup_navlico_fsm_isr( void );
@@ -226,8 +226,7 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 			ESP_ERROR_CHECK( rtc_gpio_hold_dis( gpio->num ) );
 			ESP_ERROR_CHECK( rtc_gpio_deinit( gpio->num ) );
 		}
-		gpio_hold_dis( gpio->num );
-		gpio_set_direction( gpio->num, gpio->mode );
+		gpio_sleep_sel_dis( gpio->num );
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
 	}
 	if ( state->lights[0] ) {
@@ -240,8 +239,7 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 			ESP_ERROR_CHECK( rtc_gpio_hold_dis( gpio->num ) );
 			ESP_ERROR_CHECK( rtc_gpio_deinit( gpio->num ) );
 		}
-		gpio_hold_dis( gpio->num );
-		gpio_set_direction( gpio->num, gpio->mode );
+		gpio_sleep_sel_dis( gpio->num );
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
 	}
 	if ( state->lights[1] ) {
@@ -254,8 +252,7 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 			ESP_ERROR_CHECK( rtc_gpio_hold_dis( gpio->num ) );
 			ESP_ERROR_CHECK( rtc_gpio_deinit( gpio->num ) );
 		}
-		gpio_hold_dis( gpio->num );
-		gpio_set_direction( gpio->num, gpio->mode );
+		gpio_sleep_sel_dis( gpio->num );
 		ESP_ERROR_CHECK( gpio_set_level( gpio->num, gpio->active_level ) );
 	}
 }
@@ -321,7 +318,7 @@ void navlico_fsm_task( void* ) {
 		// while the first interrupt is still being handled.
 		enable_navlico_fsm_gpio_interrupts( ignored_gpio );
 		// The wake-up source are not disabled, but we must (re-)set them as the ignored button may have changed.
-		enable_navlico_fsm_gpio_wakeup( ignored_gpio );
+		enable_navlico_fsm_gpio_wakeup( ignored_gpio, is_navlico_fsm_deep_sleep_ready() );
 		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
 		disable_navlico_fsm_gpio_wakeup();
 		update_navlico_fsm_state( false );

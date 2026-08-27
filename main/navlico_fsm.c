@@ -66,9 +66,16 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
  *  - after the interrupt-service routine (ISR) notified this task
  *
  * @param ignored_gpio GPIO to ignore while searching for the the pressed button
+ *
+ * @param button_hint The pointer to the button in `navlico_fsm_buttons` which likely has been pressed and caused the
+ * notification.
+ *
  * @return The currently or most recently pressed button.
  */
-static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpio_t const * ignored_gpio ) {
+static navlico_fsm_button_t const * read_navlico_fsm_input_pins(
+	navlico_fsm_gpio_t const * ignored_gpio,
+	navlico_fsm_button_t const * const button_hint
+) {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -82,43 +89,41 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins( navlico_fsm_gpi
 	static constexpr useconds_t initialDebounceDelay = 20000;
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
 
-	uint_fast8_t btn_levels[ BTN_COUNT ];
-	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b )
-		btn_levels[b] = 0;
+	if ( button_hint == nullptr ) {
+		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
+		return nullptr;
+	}
+
+	uint_fast8_t btn_level = 0;
+	navlico_fsm_gpio_t const * gpio = button_hint->gpio;
+	if ( gpio == ignored_gpio ) {
+		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO as the button presumably being pressed shall be ignored" );
+		return nullptr;
+	}
+
 	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
-	// Repeated readings to debounce
+	// Repeated readings to debounce and ensure that the interrupt was not just a spurious event
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
-		for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
-			navlico_fsm_gpio_t const * gpio = navlico_fsm_buttons[b].gpio;
-			if ( gpio == ignored_gpio ) continue;
-			btn_levels[b] +=
-				gpio_get_level( gpio->num ) == gpio->active_level;
-		}
+		btn_level +=
+			gpio_get_level( gpio->num ) == gpio->active_level;
 		usleep( inbetweenDebounceDelay );
 	}
 #ifdef CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
-	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
-	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
-	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
-		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[b].gpio;
-		ESP_LOGD(
-			NAVLICO_FSM_TAG,
-			"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
-			gpio->num,
-			b,
-			navlico_fsm_buttons[b].label,
-			btn_levels[b],
-			btn_levels[b] > debounceProbes / 2 ? 'x' : ' ',
-			gpio == ignored_gpio ? 'x' : ' '
-		);
-	}
+	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active│" );
+	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼───────┤" );
+	ESP_LOGD(
+		NAVLICO_FSM_TAG,
+		"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │",
+		gpio->num,
+		button_hint->id,
+		button_hint->label,
+		btn_level,
+		btn_level > debounceProbes / 2 ? 'x' : ' '
+	);
 #endif
-	for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
-		// We take the first button for which more than half of the probes indicated an active GPIO
-		if ( btn_levels[b] > debounceProbes / 2 )
-			return &navlico_fsm_buttons[b];
-	}
+	if ( btn_level > debounceProbes / 2 )
+		return button_hint;
 	ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
 	return nullptr;
 }
@@ -268,13 +273,16 @@ bool is_navlico_fsm_deep_sleep_ready( void ) {
  * After booting from deep-sleep users may already have released the buttons again, hence reading the current input
  * level won't give the desired result.
  * If `false`, the function calls read_navlico_fsm_input_pins(void) which reads the current level of the input pins.
+ *
+ * @param button_hint The pointer to the button in `navlico_fsm_buttons` which likely has been pressed.
+ * `nullptr` means "no clue", it doesn't mean that no button has been pressed.
  */
-void static update_navlico_fsm_state( bool const firstRun ) {
+void static update_navlico_fsm_state( bool const firstRun, navlico_fsm_button_t const * const button_hint ) {
 	navlico_fsm_state_t const * const prev_state = navlico_fsm_state;
 	navlico_fsm_state = nullptr;
 	navlico_fsm_button_t const * const button = firstRun ?
 		read_navlico_fsm_input_pins_after_start() :
-		read_navlico_fsm_input_pins( prev_state ? prev_state->button->gpio : nullptr );
+		read_navlico_fsm_input_pins( prev_state ? prev_state->button->gpio : nullptr, button_hint );
 	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
 	write_navlico_fsm_output_pins( new_state );
 	ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );
@@ -293,7 +301,7 @@ void navlico_fsm_task( void* ) {
 	setup_navlico_fsm_isr();
 
 	// Update (initialize) state after boot (either cold boot or wake-up from deep sleep)
-	update_navlico_fsm_state( true );
+	update_navlico_fsm_state( true, nullptr );
 
 	// ReSharper disable once CppDFAEndlessLoop
 	while ( true ) {
@@ -308,8 +316,9 @@ void navlico_fsm_task( void* ) {
 		enable_navlico_fsm_gpio_interrupts( ignored_gpio );
 		// The wake-up source are not disabled, but we must (re-)set them as the ignored button may have changed.
 		set_navlico_fsm_gpio_wakeup( ignored_gpio, is_navlico_fsm_deep_sleep_ready() );
-		// TODO: Receive pointer to button from the notification and pass it to the update function
-		ulTaskNotifyTake( pdTRUE, portMAX_DELAY );
-		update_navlico_fsm_state( false );
+		static_assert( sizeof( void* ) == sizeof( uint32_t ), "Pointer size must equal size of uint32_t" );
+		navlico_fsm_button_t const * button_hint = nullptr;
+		xTaskNotifyWait( UINT32_MAX, UINT32_MAX, (uint32_t*)&button_hint, portMAX_DELAY );
+		update_navlico_fsm_state( false, button_hint );
 	}
 }

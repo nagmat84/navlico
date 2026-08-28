@@ -28,17 +28,20 @@ void setup_navlico_fsm_isr( void );
 void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio );
 
 /**
- * Reads the input pins and returns the currently or most recently pressed button.
+ * Returns the button which triggered a wake-up from deep sleep
  *
  * This function is called whenever the inputs should be handled:
  *  - after cold boot
  *  - after waking-up from deep sleep
  *
- * @return The button which was pressed to trigger the wake-up from deep sleep
+ * @return The button which triggered a wake-up from deep sleep;
+ * after a cold-boot when the µC didn't come out of deep sleep but,
+ * the function returns a pointer to the OFF button (`&navlico_fsm_buttons[OFF_BTN]`) as default;
+ * if the µC has been woken up from deep sleep, but no button was the wake-up trigger, the function returns `nullptr`
  */
-static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
+static navlico_fsm_button_t const * get_navlico_fsm_deep_sleep_wakeup_button() {
 	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
-	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
+	ESP_LOGI( NAVLICO_FSM_TAG, "Determining wake-up button (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
 
 	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
 		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
@@ -56,26 +59,12 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins_after_start() {
 }
 
 /**
- * Reads the input pins and returns the currently pressed button.
+ * Asserts that the indicated GPIO is actually active after debouncing
  *
- * While searching for the currently pressed button, this function skips `ignored_gpio`.
- *
- * This function is called whenever the inputs should be handled:
- *  - after waking up from light sleep
- *  - during normal runtime
- *  - after the interrupt-service routine (ISR) notified this task
- *
- * @param ignored_gpio GPIO to ignore while searching for the the pressed button
- *
- * @param button_hint The pointer to the button in `navlico_fsm_buttons` which likely has been pressed and caused the
- * notification.
- *
- * @return The currently or most recently pressed button.
+ * @param gpio The GPIO which shall be checked
+ * @return True, if the indicated GPIO is active for multiple readings
  */
-static navlico_fsm_button_t const * read_navlico_fsm_input_pins(
-	navlico_fsm_gpio_t const * ignored_gpio,
-	navlico_fsm_button_t const * const button_hint
-) {
+bool static is_navlico_fsm_active_input( navlico_fsm_gpio_t const * const gpio ) {
 	// A button typical bounces between 0.1ms and 10ms while being pressed down.
 	// Source: https://www.mikrocontroller.net/articles/Entprellung
 	// After 20ms even the worst button should have stabilized.
@@ -88,44 +77,44 @@ static navlico_fsm_button_t const * read_navlico_fsm_input_pins(
 	static constexpr uint_fast8_t debounceProbes = 5;
 	static constexpr useconds_t initialDebounceDelay = 20000;
 	static constexpr useconds_t inbetweenDebounceDelay = 2000;
+	uint_fast8_t level = 0;
 
-	if ( button_hint == nullptr ) {
-		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
-		return nullptr;
-	}
-
-	uint_fast8_t btn_level = 0;
-	navlico_fsm_gpio_t const * gpio = button_hint->gpio;
-	if ( gpio == ignored_gpio ) {
-		ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO as the button presumably being pressed shall be ignored" );
-		return nullptr;
-	}
-
-	ESP_LOGI( NAVLICO_FSM_TAG, "Reading input pins" );
 	// Repeated readings to debounce and ensure that the interrupt was not just a spurious event
 	usleep( initialDebounceDelay );
 	for ( uint_fast8_t i = 0; i < debounceProbes; ++i ) {
-		btn_level +=
+		level +=
 			gpio_get_level( gpio->num ) == gpio->active_level;
 		usleep( inbetweenDebounceDelay );
 	}
-#ifdef CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
-	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active│" );
-	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼───────┤" );
-	ESP_LOGD(
-		NAVLICO_FSM_TAG,
-		"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │",
-		gpio->num,
-		button_hint->id,
-		button_hint->label,
-		btn_level,
-		btn_level > debounceProbes / 2 ? 'x' : ' '
-	);
-#endif
-	if ( btn_level > debounceProbes / 2 )
-		return button_hint;
-	ESP_LOGE( NAVLICO_FSM_TAG, "Unable to determine active input GPIO" );
-	return nullptr;
+
+	return level > debounceProbes / 2;
+}
+
+/**
+ * Reads the input pins and returns the currently pressed button.
+ *
+ * While searching for the currently pressed button, this function skips `ignored_gpio`.
+ *
+ * This function is called whenever the inputs should be handled:
+ *  - after waking up from light sleep
+ *  - during normal runtime
+ *  - after the interrupt-service routine (ISR) notified this task
+ *
+ * @param ignored_gpio GPIO to ignore while searching for the pressed button
+ *
+ * @param button_hint The pointer to the button in `navlico_fsm_buttons` which likely has been pressed and caused the
+ * notification.
+ *
+ * @return The currently or most recently pressed button.
+ */
+static navlico_fsm_button_t const * get_navlico_fsm_trigger_button(
+	navlico_fsm_gpio_t const * ignored_gpio,
+	navlico_fsm_button_t const * const button_hint
+) {
+	assert( button_hint != nullptr );
+	navlico_fsm_gpio_t const * gpio = button_hint->gpio;
+	assert( gpio != ignored_gpio );
+	return is_navlico_fsm_active_input( gpio ) ? button_hint : nullptr;
 }
 
 /**
@@ -143,51 +132,15 @@ bool static has_navlico_fsm_active_input( navlico_fsm_gpio_t const * ignored_gpi
 	return false;
 }
 
-#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
-void static dump_navlico_fsm_input_state( navlico_fsm_gpio_t const * ignored_gpio ) {
-	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... " );
-	ESP_LOGD( NAVLICO_FSM_TAG, "│ GPIO # │ Button # │ Button Label  │ Level │ Active │ Ignored │" );
-	ESP_LOGD( NAVLICO_FSM_TAG, "├────────┼──────────┼───────────────┼───────┼────────┼─────────┤" );
-	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
-		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
-		int const level = gpio_get_level( gpio->num );
-		ESP_LOGD(
-			NAVLICO_FSM_TAG,
-			"│ %6.1d │ %8.1" PRIdFAST8 " │ %-13.13s │   %1.1d   │    %c   │    %c    │",
-			gpio->num,
-			btn,
-			navlico_fsm_buttons[btn].label,
-			level,
-			level == gpio->active_level ? 'x' : ' ',
-			gpio == ignored_gpio ? 'x' : ' '
-		);
-	}
-	ESP_LOGD( NAVLICO_FSM_TAG, "Dumping input state ... finished" );
-}
-#endif
-
 /**
  * Waits until all input pins but the ignored one have become idle
  *
  * @param ignored_gpio The GPIO which shall be ignored when waiting for all pins to become idle
  */
 void static wait_for_navlico_fsm_idle_input( navlico_fsm_gpio_t const * ignored_gpio ) {
-#if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
-	unsigned int counter = 0;
-	while ( has_navlico_fsm_active_input( ignored_gpio ) ) {
-		vTaskDelay( pdMS_TO_TICKS( 10 ) );
-		if ( counter % 200 == 0 ) {
-			dump_navlico_fsm_input_state( ignored_gpio );
-			counter = 1;
-		} else {
-			counter++;
-		}
-	}
-#else
 	while ( has_navlico_fsm_active_input( ignored_gpio ) ) {
 		vTaskDelay( pdMS_TO_TICKS( 10 ) );
 	}
-#endif
 }
 
 /**
@@ -268,21 +221,23 @@ bool is_navlico_fsm_deep_sleep_ready( void ) {
  * This is a safety precaution in case another task calls get_navlico_fsm_state(void) asynchronously and concurrently
  * while this function is in the middle of updating the output pins to indicate that the there is no consistent state yet.
  *
- * @param firstRun If `true`, the function calls read_navlico_fsm_input_pins_after_start(void)
+ * @param firstRun If `true`, the function calls get_navlico_fsm_deep_sleep_wakeup_button(void)
  * which reads the input level which has been latched upon boot.
  * After booting from deep-sleep users may already have released the buttons again, hence reading the current input
  * level won't give the desired result.
  * If `false`, the function calls read_navlico_fsm_input_pins(void) which reads the current level of the input pins.
  *
- * @param button_hint The pointer to the button in `navlico_fsm_buttons` which likely has been pressed.
- * `nullptr` means "no clue", it doesn't mean that no button has been pressed.
+ * @param button_hint The pointer to the button in `navlico_fsm_buttons` which triggered the notification (and possibly
+ * wake-up from light sleep). If `firstRun == false`, `button_hint` must be a valid, non-null pointer to a button.
+ * If `firstRun == true`, `button_hint` is irrelevant and may be set to `nullptr`.
  */
 void static update_navlico_fsm_state( bool const firstRun, navlico_fsm_button_t const * const button_hint ) {
+	assert( firstRun || button_hint != nullptr );
 	navlico_fsm_state_t const * const prev_state = navlico_fsm_state;
 	navlico_fsm_state = nullptr;
 	navlico_fsm_button_t const * const button = firstRun ?
-		read_navlico_fsm_input_pins_after_start() :
-		read_navlico_fsm_input_pins( prev_state ? prev_state->button->gpio : nullptr, button_hint );
+		get_navlico_fsm_deep_sleep_wakeup_button() :
+		get_navlico_fsm_trigger_button( prev_state ? prev_state->button->gpio : nullptr, button_hint );
 	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
 	write_navlico_fsm_output_pins( new_state );
 	ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );

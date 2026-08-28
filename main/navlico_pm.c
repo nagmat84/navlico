@@ -25,12 +25,12 @@ static constexpr DRAM_ATTR char NAVLICO_PM_DEEP_STR[] = "deep";
 static RTC_DATA_ATTR struct timeval navlico_pm_deep_sleep_enter_time;
 
 static esp_err_t IRAM_ATTR log_navlico_pm_enter_sleep( int64_t const sleep_time_us, void* ) {
-	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Going to sleep for approximately %" PRId64 " ms ...", sleep_time_us );
+	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Going to sleep for approximately %" PRId64 " ms ...", sleep_time_us / 1000 );
 	return ESP_OK;
 }
 
 static esp_err_t IRAM_ATTR log_navlico_pm_exit_sleep( int64_t const sleep_time_us, void *arg ) {
-	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Spent %" PRId64 " ms in %s sleep", sleep_time_us, arg );
+	ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Spent %" PRId64 " ms in %s sleep", sleep_time_us / 1000, arg );
 	return ESP_OK;
 }
 
@@ -56,10 +56,6 @@ esp_err_t IRAM_ATTR navlico_pm_try_deep_sleep( int64_t const sleep_time_us, void
 #if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 	gettimeofday( &navlico_pm_deep_sleep_enter_time, nullptr );
 #endif
-	if ( sleep_time_us < CONFIG_NAVLICO_DEEP_SLEEP_THRESHOLD_MS * 1000 ) {
-		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Expected sleep time of %" PRId64 " ms too short for deep sleep", sleep_time_us / 1000 );
-		return ESP_OK;
-	}
 	if ( !is_navlico_fsm_deep_sleep_ready() ) {
 		ESP_EARLY_LOGI( NAVLICO_PM_TAG, "Navlico FSM is not ready for deep sleep" );
 		return ESP_OK;

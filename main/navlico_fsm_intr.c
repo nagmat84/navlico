@@ -97,7 +97,11 @@ void static dump_navlico_fsm_isr_config( void ) {}
 #endif
 
 /**
- * Registers the interrupt-service routine (ISR) for GPIO
+ * Registers the interrupt-service routine (ISR) for GPIO, but keeps the interrupt source disabled.
+ *
+ * This function _only_ installs the ISR in memory and allocates the interrupt line.
+ * It does _not_ actually enable the GPIO peripheral to trigger interrupts.
+ * Call `enable_navlico_fsm_gpio_interrupts` to actually enable interrupts.
  *
  * @internal This function registers the ISR with `ESP_INTR_FLAG_IRAM` to mark it as IRAM-safe, see
  * [Espressif: ESP-IDF Programming Guide - System API - Interrupt Allocation](https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-reference/system/intr_alloc.html#iram-safe-interrupt-handlers).

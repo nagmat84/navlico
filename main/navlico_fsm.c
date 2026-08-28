@@ -20,12 +20,22 @@ const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 /// The active operational state
 static RTC_DATA_ATTR navlico_fsm_state_t const * navlico_fsm_state = nullptr;
 
-// Defined in `navlicao_fsm_gpio_setup.c`
+// Defined in `navlico_fsm_gpio_setup.c`
 void setup_navlico_fsm_gpio();
 void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio, bool prepare_for_deep_sleep );
-// Defined in `navlicao_fsm_intr.c`
+// Defined in `navlico_fsm_intr.c`
 void setup_navlico_fsm_isr( void );
 void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio );
+
+/**
+ * Checks if the µC has been woken up by a low-power (lp) button from deep sleep.
+ *
+ * @return True, if the µC has been woken up by a low-power (lp) button from deep sleep. False, otherwise.
+ */
+static bool has_navlico_fsm_been_woken_up_by_lp_button() {
+	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
+	return wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 );
+}
 
 /**
  * Returns the button which triggered a wake-up from deep sleep
@@ -40,10 +50,7 @@ void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio
  * if the µC has been woken up from deep sleep, but no button was the wake-up trigger, the function returns `nullptr`
  */
 static navlico_fsm_button_t const * get_navlico_fsm_deep_sleep_wakeup_button() {
-	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
-	ESP_LOGI( NAVLICO_FSM_TAG, "Determining wake-up button (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
-
-	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
+	if ( has_navlico_fsm_been_woken_up_by_lp_button() ) {
 		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
 		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
 		for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
@@ -144,14 +151,45 @@ void static wait_for_navlico_fsm_idle_input( navlico_fsm_gpio_t const * ignored_
 }
 
 /**
+ * Sets all indicators but the ignored one to the given state
+ *
+ * @param state True, if indicators shall be activated; false, if indicators shall be deactivated.
+ * @param ignored_gpio GPIO whose state shall remain unchanged
+ */
+void static set_navlico_fsm_all_indicators( bool const state, navlico_fsm_gpio_t const * const ignored_gpio ) {
+	for ( navlico_fsm_indicator_id_t i = 0; i < IND_COUNT; ++i ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_indicators[i].gpio;
+		if ( gpio == ignored_gpio ) continue;
+		ESP_ERROR_CHECK( gpio_set_level( gpio->num, state ? gpio->active_level : 1 - gpio->active_level ) );
+	}
+}
+
+/**
+ * Sets all lights but the ignored ones to the given state
+ *
+ * @param state True, if lights shall be activated; false, if lights shall be deactivated.
+ * @param ignored_gpio_0 First GPIO whose state shall remain unchanged
+ * @param ignored_gpio_1 Second GPIO whose state shall remain unchanged
+ */
+void static set_navlico_fsm_all_lights(
+	bool const state,
+	navlico_fsm_gpio_t const * const ignored_gpio_0,
+	navlico_fsm_gpio_t const * const ignored_gpio_1
+) {
+	for ( navlico_fsm_light_id_t l = 0; l < LIGHT_COUNT; ++l ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_lights[l].gpio;
+		if ( gpio == ignored_gpio_0 || gpio == ignored_gpio_1 ) continue;
+		ESP_ERROR_CHECK( gpio_set_level( gpio->num, state ? gpio->active_level : 1 - gpio->active_level ) );
+	}
+}
+
+/**
  * Writes the output pins according to the current operational state.
  *
  * This function uses the currently stored operational state in #operational_state to set the output pins.
  */
 void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const state ) {
-	// TODO: We should do something else here and conspicuously indicate this error condition instead of just doing nothing
-	if ( state == nullptr )
-		return;
+	assert ( state != nullptr );
 
 	ESP_LOGI( NAVLICO_FSM_TAG, "Writing output pins" );
 	navlico_fsm_gpio_t const * const indicator_gpio = state->indicator ? state->indicator->gpio : nullptr;
@@ -159,16 +197,8 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 	navlico_fsm_gpio_t const * const light_1_gpio = state->lights[1] ? state->lights[1]->gpio : nullptr;
 
 	// Deactivate all indicator and lights but skip those who might be re-enabled anyway to avoid flicker
-	for ( navlico_fsm_indicator_id_t i = 0; i < IND_COUNT; ++i ) {
-		navlico_fsm_gpio_t const * const gpio = navlico_fsm_indicators[i].gpio;
-		if ( gpio == indicator_gpio ) continue;
-		ESP_ERROR_CHECK( gpio_set_level( gpio->num, 1 - gpio->active_level ) );
-	}
-	for ( navlico_fsm_light_id_t l = 0; l < LIGHT_COUNT; ++l ) {
-		navlico_fsm_gpio_t const * const gpio = navlico_fsm_lights[l].gpio;
-		if ( gpio == light_0_gpio || gpio == light_1_gpio ) continue;
-		ESP_ERROR_CHECK( gpio_set_level( gpio->num, 1 - gpio->active_level ) );
-	}
+	set_navlico_fsm_all_indicators( false, indicator_gpio );
+	set_navlico_fsm_all_lights( false, light_0_gpio, light_1_gpio );
 
 #if CONFIG_NAVLICO_HAS_VERBOSE_OUTPUT
 	uint64_t const mask =
@@ -201,6 +231,36 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 			state->lights[1]->id, state->lights[1]->label, light_1_gpio->num, light_1_gpio->active_level
 		);
 		ESP_ERROR_CHECK( gpio_set_level( light_1_gpio->num, light_1_gpio->active_level ) );
+	}
+}
+
+/**
+ * Runs the initial light show
+ */
+void static run_navlico_fsm_initial_light_show( void ) {
+	set_navlico_fsm_all_indicators( true, nullptr );
+	for ( uint_fast8_t i = 0; i < 3; ++i ) {
+		set_navlico_fsm_all_lights( true, nullptr, nullptr );
+		vTaskDelay( pdMS_TO_TICKS( 500 ) );
+		set_navlico_fsm_all_lights( false, nullptr, nullptr );
+		vTaskDelay( pdMS_TO_TICKS( 500 ) );
+	}
+	set_navlico_fsm_all_indicators( false, nullptr );
+}
+
+/**
+ * Runs the panic light show
+ *
+ * This function never returns.
+ * The FSM will remain in its current state until the µC is reset.
+ */
+void static run_navlico_fsm_panic_light_show( void ) {
+	// ReSharper disable once CppDFAEndlessLoop
+	while ( true ) {
+		set_navlico_fsm_all_indicators( true, nullptr );
+		vTaskDelay( pdMS_TO_TICKS( 500 ) );
+		set_navlico_fsm_all_indicators( false, nullptr );
+		vTaskDelay( pdMS_TO_TICKS( 500 ) );
 	}
 }
 
@@ -239,8 +299,13 @@ void static update_navlico_fsm_state( bool const firstRun, navlico_fsm_button_t 
 		get_navlico_fsm_deep_sleep_wakeup_button() :
 		get_navlico_fsm_trigger_button( prev_state ? prev_state->button->gpio : nullptr, button_hint );
 	navlico_fsm_state_t const * const new_state = button ? button->state : nullptr;
-	write_navlico_fsm_output_pins( new_state );
-	ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );
+	if ( new_state == nullptr ) {
+		ESP_LOGE( NAVLICO_FSM_TAG, "New state is undefined!" );
+		run_navlico_fsm_panic_light_show();
+	} else {
+		ESP_LOGI( NAVLICO_FSM_TAG, "New state is: %s", new_state->label );
+		write_navlico_fsm_output_pins( new_state );
+	}
 	wait_for_navlico_fsm_idle_input( new_state->button->gpio );
 	navlico_fsm_state = new_state;
 }
@@ -254,6 +319,8 @@ void static update_navlico_fsm_state( bool const firstRun, navlico_fsm_button_t 
 void navlico_fsm_task( void* ) {
 	setup_navlico_fsm_gpio();
 	setup_navlico_fsm_isr();
+	if ( !has_navlico_fsm_been_woken_up_by_lp_button() )
+		run_navlico_fsm_initial_light_show();
 
 	// Update (initialize) state after boot (either cold boot or wake-up from deep sleep)
 	update_navlico_fsm_state( true, nullptr );

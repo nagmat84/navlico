@@ -6,6 +6,7 @@
 #include <esp_attr.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
+#include <inttypes.h>
 
 /// The handle for the Navlico FSM Task
 static DRAM_ATTR TaskHandle_t navlico_fsm_task_handle;
@@ -73,11 +74,14 @@ void static IRAM_ATTR disable_navlico_fsm_gpio_interrupts( void ) {
  * - https://docs.espressif.com/projects/esp-idf/en/v6.0.2/esp32h2/api-guides/memory-types.html#when-to-place-code-in-iram
  * Hence, `vTaskNotifyGiveFromISR` and `vPortYieldFromISR` must be placed in IRAM, too.
  * This means `CONFIG_FREERTOS_IN_IRAM=y` and `CONFIG_GPIO_CTRL_FUNC_IN_IRAM=y` must be set.
+ *
+ * @param button_hint The pointer to the button in `navlico_fsm_buttons` which likely triggered the interrupt
  */
-void static IRAM_ATTR handle_navlico_fsm_gpio_interrupt( void* ) {
+void static IRAM_ATTR handle_navlico_fsm_gpio_interrupt( void * button_hint ) {
 	disable_navlico_fsm_gpio_interrupts();
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-	vTaskNotifyGiveFromISR( navlico_fsm_task_handle, &xHigherPriorityTaskWoken );
+	static_assert( sizeof( void* ) == sizeof( uint32_t ), "Pointer size must equal size of uint32_t" );
+	xTaskNotifyFromISR( navlico_fsm_task_handle, (uint32_t)button_hint, eSetValueWithOverwrite , &xHigherPriorityTaskWoken );
 	if ( xHigherPriorityTaskWoken == pdTRUE ) {
 		vPortYieldFromISR();
 	}
@@ -107,7 +111,7 @@ void setup_navlico_fsm_isr( void ) {
 	for ( navlico_fsm_button_id_t btn = 0; btn < BTN_COUNT; ++btn ) {
 		navlico_fsm_gpio_t const * const gpio = navlico_fsm_buttons[btn].gpio;
 		ESP_ERROR_CHECK( gpio_isr_handler_add(
-			gpio->num, handle_navlico_fsm_gpio_interrupt, nullptr
+			gpio->num, handle_navlico_fsm_gpio_interrupt, (void*)&navlico_fsm_buttons[btn]
 		) );
 	}
 	ESP_LOGD( NAVLICO_FSM_TAG, "Interrupt-service routine registered" );

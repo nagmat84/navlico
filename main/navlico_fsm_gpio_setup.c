@@ -56,6 +56,10 @@ void static dump_navlico_fsm_io_configuration( void ) {}
  * @param gpio_def The GPIO definition (contains GPIO number and configuration)
  */
 void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_t const * const gpio_def ) {
+	// Make the GPIO floating before setting direction and level
+	// as otherwise we might accidentally drive the GPIO into one direction while pulling it into the other direction.
+	ESP_ERROR_CHECK( gpio_set_pull_mode( gpio_def->num, GPIO_FLOATING ) );
+	ESP_ERROR_CHECK( gpio_sleep_set_pull_mode( gpio_def->num, GPIO_FLOATING ) );
 	// To avoid flickering if the mode of the GPIO is open-drain,
 	// we first disable the GPIO, then set its level to inactive, and finally set the GPIO to its real mode.
 	// In case that mode is open-drain, the GPIO is immediately inactive.
@@ -63,8 +67,6 @@ void static setup_navlico_fsm_gpio_function( navlico_fsm_gpio_t const * const gp
 	ESP_ERROR_CHECK( gpio_set_level( gpio_def->num, 1 - gpio_def->active_level ) );
 	ESP_ERROR_CHECK( gpio_set_direction( gpio_def->num, gpio_def->mode ) );
 	ESP_ERROR_CHECK( gpio_sleep_set_direction( gpio_def->num, gpio_def->mode ) );
-	ESP_ERROR_CHECK( gpio_set_pull_mode( gpio_def->num, GPIO_FLOATING ) );
-	ESP_ERROR_CHECK( gpio_sleep_set_pull_mode( gpio_def->num, GPIO_FLOATING ) );
 	ESP_ERROR_CHECK( gpio_intr_disable( gpio_def->num ) );
 	ESP_ERROR_CHECK( gpio_set_intr_type( gpio_def->num, GPIO_INTR_DISABLE ) );
 }

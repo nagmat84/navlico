@@ -28,6 +28,16 @@ void setup_navlico_fsm_isr( void );
 void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio );
 
 /**
+ * Checks if the µC has been woken up by a low-power (lp) button from deep sleep.
+ *
+ * @return True, if the µC has been woken up by a low-power (lp) button from deep sleep. False, otherwise.
+ */
+static bool has_navlico_fsm_been_woken_up_by_lp_button() {
+	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
+	return wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 );
+}
+
+/**
  * Returns the button which triggered a wake-up from deep sleep
  *
  * This function is called whenever the inputs should be handled:
@@ -40,10 +50,7 @@ void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio
  * if the µC has been woken up from deep sleep, but no button was the wake-up trigger, the function returns `nullptr`
  */
 static navlico_fsm_button_t const * get_navlico_fsm_deep_sleep_wakeup_button() {
-	uint32_t const wakeup_causes = esp_sleep_get_wakeup_causes();
-	ESP_LOGI( NAVLICO_FSM_TAG, "Determining wake-up button (wakeup_causes = 0x%.8" PRIx32 ")", wakeup_causes );
-
-	if ( wakeup_causes & BIT( ESP_SLEEP_WAKEUP_EXT1 ) ) {
+	if ( has_navlico_fsm_been_woken_up_by_lp_button() ) {
 		ESP_LOGI( NAVLICO_FSM_TAG, "Woke up from deep sleep" );
 		uint64_t const wakeup_pin_mask = esp_sleep_get_ext1_wakeup_status();
 		for ( navlico_fsm_button_id_t b = 0; b < BTN_COUNT; ++b ) {
@@ -204,6 +211,31 @@ void static write_navlico_fsm_output_pins( navlico_fsm_state_t const * const sta
 	}
 }
 
+void static set_navlico_fsm_all_indicators( bool const active ) {
+	for ( navlico_fsm_indicator_id_t i = 0; i < IND_COUNT; ++i ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_indicators[i].gpio;
+		gpio_set_level( gpio->num, active ? gpio->active_level : 1 - gpio->active_level );
+	}
+}
+
+void static set_navlico_fsm_all_lights( bool const active ) {
+	for ( navlico_fsm_light_id_t l = 0; l < LIGHT_COUNT; ++l ) {
+		navlico_fsm_gpio_t const * const gpio = navlico_fsm_lights[l].gpio;
+		gpio_set_level( gpio->num, active ? gpio->active_level : 1 - gpio->active_level );
+	}
+}
+
+void static run_navlico_fsm_initial_light_show( void ) {
+	set_navlico_fsm_all_indicators( true );
+	for ( uint_fast8_t i = 0; i < 3; ++i ) {
+		set_navlico_fsm_all_lights( true );
+		vTaskDelay( pdMS_TO_TICKS( 500 ) );
+		set_navlico_fsm_all_lights( false );
+		vTaskDelay( pdMS_TO_TICKS( 500 ) );
+	}
+	set_navlico_fsm_all_indicators( false );
+}
+
 /**
  * Returns whether the FSM is ready for deep sleep
  *
@@ -254,6 +286,8 @@ void static update_navlico_fsm_state( bool const firstRun, navlico_fsm_button_t 
 void navlico_fsm_task( void* ) {
 	setup_navlico_fsm_gpio();
 	setup_navlico_fsm_isr();
+	if ( !has_navlico_fsm_been_woken_up_by_lp_button() )
+		run_navlico_fsm_initial_light_show();
 
 	// Update (initialize) state after boot (either cold boot or wake-up from deep sleep)
 	update_navlico_fsm_state( true, nullptr );

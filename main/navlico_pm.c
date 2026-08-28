@@ -106,7 +106,7 @@ void setup_power_management( void ) {
 		.exit_cb = nullptr,
 		.enter_cb_user_arg = nullptr,
 		.exit_cb_user_arg = nullptr,
-		.enter_cb_prior = UINT32_MAX, // redirection to deep sleep must be executed as the last callback as nothing will be executed after going into deep sleep sucessfully
+		.enter_cb_prior = UINT32_MAX, // redirection to deep sleep must be executed as the last callback as nothing will be executed after going into deep sleep successfully
 		.exit_cb_prior = 0
 	};
 	ESP_ERROR_CHECK( esp_pm_light_sleep_register_cbs( &pm_cb_deep_sleep_config ) );

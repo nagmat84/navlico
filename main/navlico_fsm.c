@@ -20,10 +20,10 @@ const char NAVLICO_FSM_TAG[] = "navlico_fsm";
 /// The active operational state
 static RTC_DATA_ATTR navlico_fsm_state_t const * navlico_fsm_state = nullptr;
 
-// Defined in `navlicao_fsm_gpio_setup.c`
+// Defined in `navlico_fsm_gpio_setup.c`
 void setup_navlico_fsm_gpio();
 void set_navlico_fsm_gpio_wakeup( navlico_fsm_gpio_t const * ignored_gpio, bool prepare_for_deep_sleep );
-// Defined in `navlicao_fsm_intr.c`
+// Defined in `navlico_fsm_intr.c`
 void setup_navlico_fsm_isr( void );
 void enable_navlico_fsm_gpio_interrupts( navlico_fsm_gpio_t const * ignored_gpio );
 
@@ -154,7 +154,7 @@ void static wait_for_navlico_fsm_idle_input( navlico_fsm_gpio_t const * ignored_
  * Sets all indicators but the ignored one to the given state
  *
  * @param state True, if indicators shall be activated; false, if indicators shall be deactivated.
- * @param ignored_gpio GPIO whose state sholl remain unchanged
+ * @param ignored_gpio GPIO whose state shall remain unchanged
  */
 void static set_navlico_fsm_all_indicators( bool const state, navlico_fsm_gpio_t const * const ignored_gpio ) {
 	for ( navlico_fsm_indicator_id_t i = 0; i < IND_COUNT; ++i ) {
@@ -168,8 +168,8 @@ void static set_navlico_fsm_all_indicators( bool const state, navlico_fsm_gpio_t
  * Sets all lights but the ignored ones to the given state
  *
  * @param state True, if lights shall be activated; false, if lights shall be deactivated.
- * @param ignored_gpio_0 First GPIO whose state sholl remain unchanged
- * @param ignored_gpio_1 Second GPIO whose state sholl remain unchanged
+ * @param ignored_gpio_0 First GPIO whose state shall remain unchanged
+ * @param ignored_gpio_1 Second GPIO whose state shall remain unchanged
  */
 void static set_navlico_fsm_all_lights(
 	bool const state,
